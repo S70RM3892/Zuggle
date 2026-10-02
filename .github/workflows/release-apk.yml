@@ -103,6 +103,6 @@ jobs:
             echo
             echo "変更点は README と仕様書の改善ログを参照。"
             echo
-            echo "クレジット：「Neon Talon」 made with Meshy（CC BY 4.0）"
+            echo "クレジット：「Neon Talon」「Neon Cybernetic Hand」 made with Meshy（CC BY 4.0）"
           } > /tmp/notes.md
           gh release create "$tag" "$APK" --target "$GITHUB_SHA" --title "Zuggle $VERSION" --notes-file /tmp/notes.md "${prerelease[@]}"

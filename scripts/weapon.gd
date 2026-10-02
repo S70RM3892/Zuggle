@@ -1,10 +1,26 @@
 class_name Weapon
 extends Node3D
-## 一人称の手と武器。通常攻撃（X / 左クリック）の振り、当たり判定、伸び縮み、壁へのめり込み防止。
-## 見た目は Swing/Grip の下に置く。res://models/weapon.glb があればそれを、なければ箱の剣を使う。
-## 当たり判定は見た目のメッシュを使わず、刃に沿わせた細長い箱で取る。
+## 一人称の手と武器。通常攻撃（X / 左クリック）の振り、当たり判定、伸び縮み、壁へのめり込み防止、
+## ナイフ回し（Y / F）。
+## 手は Swing/HandModel（骨入りのメカの手）、武器は Swing/Grip の下に置く。
+## res://models/weapon.glb があればそれを、なければ箱の剣を使う。
+## 当たり判定は見た目のメッシュを使わず、Swing の前(-Z)へ伸ばした細長い箱で取る。
 
-enum State { IDLE, WINDUP, ACTIVE, RECOVERY }
+enum State { IDLE, WINDUP, ACTIVE, RECOVERY, INSPECT }
+
+# 指の曲げ角（度）。各指は付け根・中・先の3関節。正で手のひら側へ曲がる
+const CURL_GRIP := {
+	"index": [80.0, 95.0, 55.0], "middle": [80.0, 95.0, 55.0], "ring": [82.0, 95.0, 55.0],
+	"pinky": [85.0, 95.0, 55.0], "thumb": [25.0, 45.0, 40.0],
+}
+# ナイフを回している間：人差し指は輪に通したまま、ほかの指を開いて刃の通り道を空ける
+const CURL_SPIN := {
+	"index": [70.0, 90.0, 50.0], "middle": [15.0, 10.0, 5.0], "ring": [20.0, 10.0, 5.0],
+	"pinky": [25.0, 10.0, 5.0], "thumb": [5.0, 10.0, 10.0],
+}
+const INSPECT_TIME := 1.0
+const SPIN_TURNS := 2.0
+const POSE_INSPECT := Vector3(8.0, 12.0, 30.0) # 回す間は少し持ち上げ、ひねって見せる
 
 const MODEL_PATH := "res://models/weapon.glb"
 const HURTBOX_LAYER := 2 # ダミーなど、斬られる側の当たり判定の層
@@ -15,9 +31,11 @@ const SQUASH_STIFFNESS := 300.0
 const SQUASH_DAMPING := 18.0
 
 # 振りの姿勢（度）：x=刃先の上下、y=刃先の左右（正で左）、z=ひねり
-const POSE_IDLE := Vector3(35.0, 15.0, -10.0)
-const POSE_WINDUP := Vector3(5.0, -80.0, -80.0) # 右から左へ振るときの構え。左から振るときは左右を反転
-const POSE_FOLLOW := Vector3(-5.0, 80.0, -80.0)
+# 肘（拳の後ろ ELBOW の位置）を中心に回すので、前腕は肘の方を向いたまま拳が弧を描く
+const POSE_IDLE := Vector3(15.0, 10.0, 0.0)
+const POSE_WINDUP := Vector3(5.0, -60.0, -80.0) # 右から左へ振るときの構え。左から振るときは左右を反転
+const POSE_FOLLOW := Vector3(-5.0, 60.0, -80.0)
+const ELBOW := Vector3(0.0, 0.0, 0.35)
 
 ## Meshyのモデルを読み込んだとき、長さと向きを自動で合わせる。Gripの位置と向きは手で微調整する
 @export var auto_fit := true
@@ -32,6 +50,7 @@ const POSE_FOLLOW := Vector3(-5.0, 80.0, -80.0)
 
 var state := State.IDLE
 var swing_count := 0
+var inspect_count := 0
 var using_model := false
 
 var _t := 0.0
@@ -45,6 +64,11 @@ var _squash := 0.0
 var _squash_vel := 0.0
 var _base_position: Vector3
 var _player: Player
+var _grip_rest: Transform3D
+var _spin_pivot := Vector3.ZERO # ナイフを回す軸（輪の中心）。Gripの座標
+var _spin := 0.0 # ナイフの回転（ラジアン）
+var _open := 0.0 # 指の開き。0で握る、1でナイフ回しの形
+var _skeleton: Skeleton3D
 
 @onready var swing: Node3D = $Swing
 @onready var grip: Node3D = $Swing/Grip
@@ -53,8 +77,13 @@ var _player: Player
 func _ready() -> void:
 	_base_position = position
 	_player = _find_player()
+	_grip_rest = grip.transform
+	_spin_pivot = Vector3(0.0, 0.0, grip_back - 0.02)
 	if ResourceLoader.exists(MODEL_PATH):
 		_use_model(load(MODEL_PATH))
+	var skels := find_children("*", "Skeleton3D", true, false)
+	if not skels.is_empty():
+		_skeleton = skels[0]
 
 
 func _physics_process(delta: float) -> void:
@@ -62,25 +91,40 @@ func _physics_process(delta: float) -> void:
 		_buffer = Tuning.attack_buffer
 	else:
 		_buffer -= delta
-	if _buffer > 0.0 and (state == State.IDLE or state == State.RECOVERY):
+	if _buffer > 0.0 and (state == State.IDLE or state == State.RECOVERY or state == State.INSPECT):
 		_buffer = 0.0
-		_start_swing()
+		_start_swing() # ナイフ回しの途中でも攻撃を優先する
+	elif state == State.IDLE and _player and _player.input_enabled and Input.is_action_just_pressed("inspect"):
+		_start_inspect()
 	_advance(delta)
 	if state == State.ACTIVE:
 		_check_hits()
 	_update_squash(delta)
 	_update_retract(delta)
 	_apply_pose()
+	_apply_hand()
 
 
 func is_attacking() -> bool:
-	return state != State.IDLE
+	return state == State.WINDUP or state == State.ACTIVE or state == State.RECOVERY
 
 
-## 刃に沿わせた判定の箱のワールド座標での姿勢。Gripの -Z が刃の向き。
+func is_inspecting() -> bool:
+	return state == State.INSPECT
+
+
+## 判定の箱のワールド座標での姿勢。握る位置から Swing の前(-Z)へ伸ばす。
 func hitbox_transform() -> Transform3D:
-	var g := grip.global_transform.orthonormalized()
+	var g := swing.global_transform.orthonormalized()
 	return Transform3D(g.basis, g * Vector3(0.0, 0.0, -hit_length * 0.5))
+
+
+## ナイフ回し：輪に通した人差し指を軸に、ナイフを2回転させて握り直す。
+func _start_inspect() -> void:
+	inspect_count += 1
+	_from = _pose
+	_t = 0.0
+	state = State.INSPECT
 
 
 func _start_swing() -> void:
@@ -89,6 +133,8 @@ func _start_swing() -> void:
 	_hit_ids.clear()
 	_from = _pose
 	_t = 0.0
+	_spin = 0.0 # 回している途中なら握り直してから振る
+	_open = 0.0
 	state = State.WINDUP
 
 
@@ -115,6 +161,17 @@ func _advance(delta: float) -> void:
 			var x := _ratio(Tuning.attack_recovery)
 			_pose = follow.lerp(POSE_IDLE, smoothstep(0.0, 1.0, x))
 			if x >= 1.0:
+				_next(State.IDLE)
+		State.INSPECT:
+			var x := _ratio(INSPECT_TIME)
+			# 指を開く(0〜0.15) → 回す(0.1〜0.8) → 握り直す(0.75〜1.0)
+			_open = smoothstep(0.0, 0.15, x) * (1.0 - smoothstep(0.75, 1.0, x))
+			_spin = TAU * SPIN_TURNS * smoothstep(0.1, 0.8, x)
+			var lift := sin(PI * x)
+			_pose = _from.lerp(POSE_IDLE, minf(1.0, x * 4.0)).lerp(POSE_INSPECT, lift)
+			if x >= 1.0:
+				_spin = 0.0
+				_open = 0.0
 				_next(State.IDLE)
 
 
@@ -199,8 +256,27 @@ func _apply_pose() -> void:
 	# 体積を保ったまま刃の向き(Z)に伸び縮みさせる
 	var sz := 1.0 + _squash
 	var sxy := 1.0 / sqrt(sz)
-	swing.transform = Transform3D(Basis.from_euler(rot) * Basis.from_scale(Vector3(sxy, sxy, sz)), Vector3.ZERO)
+	var b := Basis.from_euler(rot)
+	swing.transform = Transform3D(b * Basis.from_scale(Vector3(sxy, sxy, sz)), ELBOW - b * ELBOW)
 	position = _base_position + Vector3(0.0, -_retract * 0.2, _retract)
+
+
+## 指の曲げとナイフの回転を反映する。
+func _apply_hand() -> void:
+	var spin := Transform3D(Basis(Vector3.RIGHT, _spin), Vector3.ZERO)
+	grip.transform = _grip_rest * Transform3D(Basis.IDENTITY, _spin_pivot) * spin * Transform3D(Basis.IDENTITY, -_spin_pivot)
+	if _skeleton == null:
+		return
+	for finger in CURL_GRIP:
+		var closed: Array = CURL_GRIP[finger]
+		var opened: Array = CURL_SPIN[finger]
+		for k in 3:
+			var idx := _skeleton.find_bone("%s_%d" % [finger, k + 1])
+			if idx < 0:
+				continue
+			var angle := deg_to_rad(lerpf(closed[k], opened[k], _open))
+			var rest := _skeleton.get_bone_rest(idx).basis.get_rotation_quaternion()
+			_skeleton.set_bone_pose_rotation(idx, rest * Quaternion(Vector3.RIGHT, angle))
 
 
 func _find_player() -> Player:
@@ -252,3 +328,22 @@ func _fit(model: Node3D) -> void:
 	var center := moved.get_center()
 	var offset := Vector3(-center.x, -center.y, grip_back - moved.end.z)
 	model.transform = Transform3D(b, offset) * model.transform
+	_spin_pivot = _find_ring_center(model)
+
+
+## 柄頭の側（Gripの+Z端）にある輪の中心。柄頭から全長の1割の範囲の頂点の中心をとる。
+func _find_ring_center(model: Node3D) -> Vector3:
+	var box := AABB()
+	var first := true
+	var from_z := grip_back - model_length * 0.1
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		var mesh_i := mi as MeshInstance3D
+		var rel: Transform3D = grip.global_transform.affine_inverse() * mesh_i.global_transform
+		for si in mesh_i.mesh.get_surface_count():
+			for v in mesh_i.mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]:
+				var p: Vector3 = rel * v
+				if p.z < from_z:
+					continue
+				box = AABB(p, Vector3.ZERO) if first else box.expand(p)
+				first = false
+	return Vector3(0.0, 0.0, grip_back - 0.02) if first else box.get_center()

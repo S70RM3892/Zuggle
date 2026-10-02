@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tools/rig/build_hand.gd" id="1"]
+
+[node name="BuildHand" type="Node"]
+script = ExtResource("1")
