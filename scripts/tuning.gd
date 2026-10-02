@@ -21,6 +21,31 @@ const SPECS := [
 	["mouse_sensitivity", "マウス感度 (度/px)", 0.01, 0.5, 0.01],
 	["fov", "視野角 (度)", 60.0, 120.0, 1.0],
 	["head_bob", "頭の揺れ (m, 0でオフ)", 0.0, 0.1, 0.005],
+	["wallrun_min_speed", "壁走りに入る最低速度 (m/s)", 0.0, 15.0, 0.1],
+	["wallrun_max_angle", "壁走りに入れる壁との角度 (度)", 10.0, 90.0, 1.0],
+	["wallrun_max_time", "壁走りの継続時間の上限 (秒)", 0.2, 5.0, 0.05],
+	["wallrun_up_speed", "壁走り開始時の上向き速度 (m/s)", 0.0, 8.0, 0.1],
+	["wallrun_gravity_mult", "壁走り中の重力倍率", 0.0, 1.0, 0.01],
+	["wallrun_tilt", "壁走り中のカメラの傾き (度, 0でオフ)", 0.0, 20.0, 0.5],
+	["attack_buffer", "攻撃の先行入力 (秒)", 0.0, 0.3, 0.01],
+	["attack_windup", "攻撃の振りかぶり (秒)", 0.0, 0.3, 0.01],
+	["attack_active", "攻撃の判定時間 (秒)", 0.02, 0.3, 0.01],
+	["attack_recovery", "攻撃の戻り (秒)", 0.0, 0.5, 0.01],
+	["hitstop_min", "ヒットストップ 威力最小 (秒)", 0.0, 0.3, 0.005],
+	["hitstop_max", "ヒットストップ 威力最大 (秒)", 0.0, 0.3, 0.005],
+	["shake_trauma", "画面揺れ 1発のトラウマ値 (0でオフ)", 0.0, 1.0, 0.01],
+	["shake_max_angle", "画面揺れ 最大角度 (度)", 0.0, 10.0, 0.1],
+	["shake_decay", "画面揺れ 減衰 (/秒)", 0.2, 6.0, 0.1],
+	["shake_freq", "画面揺れ 周波数 (Hz)", 2.0, 60.0, 1.0],
+	["rumble_strength", "振動の強さ (0でオフ)", 0.0, 1.0, 0.05],
+	["rumble_duration", "振動の長さ (秒)", 0.02, 0.5, 0.01],
+	["dummy_knockback", "ダミーの吹き飛び (m/s)", 0.0, 10.0, 0.1],
+	["dummy_tilt", "ダミーのよろけ (rad/s)", 0.0, 10.0, 0.1],
+	["dummy_stiffness", "ダミーの戻る強さ", 5.0, 300.0, 1.0],
+	["dummy_damping", "ダミーの戻りの減衰", 0.0, 40.0, 0.5],
+	["dummy_squash", "ダミーの伸び縮み", 0.0, 1.0, 0.01],
+	["weapon_squash", "手・武器の伸び縮み", 0.0, 0.5, 0.01],
+	["sfx_pitch_spread", "効果音のピッチのずれ (±)", 0.0, 0.3, 0.01],
 ]
 
 var max_speed := 8.0
@@ -29,7 +54,7 @@ var ground_decel := 50.0
 var air_accel := 20.0
 var air_decel := 0.0 # 0なら空中で勢いが落ちない（大原則）
 var jump_velocity := 6.5
-var gravity := 20.0
+var gravity := 16.0
 var fall_gravity_mult := 1.6
 var jump_cut := 0.5
 var coyote_time := 0.10
@@ -40,6 +65,31 @@ var look_curve := 1.6
 var mouse_sensitivity := 0.12
 var fov := 90.0
 var head_bob := 0.015
+var wallrun_min_speed := 4.0
+var wallrun_max_angle := 60.0 # 壁に対して正面に近い角度で当たったら壁走りにしない
+var wallrun_max_time := 1.75 # 初代Titanfallの値
+var wallrun_up_speed := 2.0
+var wallrun_gravity_mult := 0.25
+var wallrun_tilt := 6.0 # 一人称では酔いに直結するので控えめ
+var attack_buffer := 0.12
+var attack_windup := 0.05
+var attack_active := 0.10
+var attack_recovery := 0.15
+var hitstop_min := 0.05 # 仕様の初期値50〜100msを威力で割り振る
+var hitstop_max := 0.10
+var shake_trauma := 0.35 # 一人称では酔いに直結するので小さめから
+var shake_max_angle := 1.5
+var shake_decay := 1.5
+var shake_freq := 25.0
+var rumble_strength := 0.8
+var rumble_duration := 0.12
+var dummy_knockback := 5.0
+var dummy_tilt := 5.0
+var dummy_stiffness := 80.0
+var dummy_damping := 9.0 # 減衰比0.5前後。少し行き過ぎてから戻る
+var dummy_squash := 0.25
+var weapon_squash := 0.15
+var sfx_pitch_spread := 0.08
 
 var _defaults := {}
 
