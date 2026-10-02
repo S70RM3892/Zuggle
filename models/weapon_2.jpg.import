@@ -3,11 +3,9 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cnmxvnhgrcw6i"
-path.s3tc="res://.godot/imported/weapon_2.jpg-40ab0d45f53050e4fe582ff066f9d19f.s3tc.ctex"
-path.etc2="res://.godot/imported/weapon_2.jpg-40ab0d45f53050e4fe582ff066f9d19f.etc2.ctex"
+path="res://.godot/imported/weapon_2.jpg-40ab0d45f53050e4fe582ff066f9d19f.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc", "etc2_astc"],
-"vram_texture": true
+"vram_texture": false
 }
 generator_parameters={
 "md5": "6cbf4db22b81a3414db75c7aa777aa64"
@@ -16,11 +14,11 @@ generator_parameters={
 [deps]
 
 source_file="res://models/weapon_2.jpg"
-dest_files=["res://.godot/imported/weapon_2.jpg-40ab0d45f53050e4fe582ff066f9d19f.s3tc.ctex", "res://.godot/imported/weapon_2.jpg-40ab0d45f53050e4fe582ff066f9d19f.etc2.ctex"]
+dest_files=["res://.godot/imported/weapon_2.jpg-40ab0d45f53050e4fe582ff066f9d19f.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -41,5 +39,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=512
+process/size_limit=0
 detect_3d/compress_to=1
