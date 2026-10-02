@@ -29,6 +29,9 @@ func _run() -> void:
 	await _test_attack_buffer()
 	await _test_retract_near_wall()
 	await _test_no_wallrun_on_dummy()
+	await _test_inspect()
+	await _test_attack_cancels_inspect()
+	await _test_hand_rig()
 	print("\n%s" % ("ALL PASSED" if _failures == 0 else "%d FAILED" % _failures))
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -47,7 +50,7 @@ func _frames(n: int) -> void:
 
 
 func _release_all() -> void:
-	for action in ["move_forward", "move_back", "move_left", "move_right", "jump", "attack"]:
+	for action in ["move_forward", "move_back", "move_left", "move_right", "jump", "attack", "inspect"]:
 		Input.action_release(action)
 
 
@@ -194,3 +197,59 @@ func _test_no_wallrun_on_dummy() -> void:
 		await get_tree().physics_frame
 		ran = ran or _player.is_wall_running()
 	_check(not ran, "ダミーの横を跳んでも入らない")
+
+
+func _press(action: String) -> void:
+	Input.action_press(action)
+	await _frames(2)
+	Input.action_release(action)
+
+
+func _knife_angle() -> float:
+	# 柄の向き(Grip の Z)が Swing の中でどれだけ回っているか
+	var z := (_weapon.swing.global_transform.affine_inverse() * _weapon.grip.global_transform).basis.z.normalized()
+	return atan2(z.z, z.y)
+
+
+func _test_inspect() -> void:
+	print("ナイフ回し")
+	await _stand(6.0)
+	var rest := _knife_angle()
+	await _press("inspect")
+	_check(_weapon.is_inspecting(), "Y / F で回し始める")
+	var turned := 0.0
+	var last := rest
+	var frames := 0
+	while _weapon.is_inspecting() and frames < 400:
+		await get_tree().physics_frame
+		frames += 1
+		var a := _knife_angle()
+		turned += absf(wrapf(a - last, -PI, PI))
+		last = a
+	var secs := frames * DT
+	_check(absf(secs - Weapon.INSPECT_TIME) < 0.05, "約%.1f秒で終わる (%.2f 秒)" % [Weapon.INSPECT_TIME, secs])
+	_check(absf(turned - TAU * Weapon.SPIN_TURNS) < 0.3, "%d回転する (%.1f 回転)" % [int(Weapon.SPIN_TURNS), turned / TAU])
+	_check(absf(wrapf(_knife_angle() - rest, -PI, PI)) < 0.01, "握り直して元の向きに戻る")
+
+
+func _test_attack_cancels_inspect() -> void:
+	print("ナイフ回しの途中でも攻撃できる")
+	await _stand(1.3)
+	await _press("inspect")
+	await _frames(int(0.3 / DT))
+	_check(_weapon.is_inspecting(), "回している")
+	var r := await _attack_and_wait_hit()
+	_check(not r.is_empty(), "攻撃が出て当たる")
+	_check(not _weapon.is_inspecting(), "ナイフ回しは止まる")
+
+
+func _test_hand_rig() -> void:
+	print("手の骨")
+	var skel: Skeleton3D = _weapon.find_children("*", "Skeleton3D", true, false)[0]
+	_check(skel.get_bone_count() == 16, "骨は16本（手のひら＋指5本×3） (%d)" % skel.get_bone_count())
+	var mesh: MeshInstance3D = skel.find_children("*", "MeshInstance3D", true, false)[0]
+	_check(mesh.skin != null and mesh.skin.get_bind_count() == 16, "メッシュに重みが付いている")
+	await _stand(6.0)
+	var idx := skel.find_bone("middle_1")
+	var gripped := skel.get_bone_pose_rotation(idx).angle_to(skel.get_bone_rest(idx).basis.get_rotation_quaternion())
+	_check(gripped > deg_to_rad(60.0), "構えでは指を握っている (%.0f 度)" % rad_to_deg(gripped))

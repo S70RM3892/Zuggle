@@ -15,6 +15,24 @@
 - ダミーでは壁走りしない（壁走りは層1の地形だけ）
 - 画面揺れと振動は調整パネルで0にすればオフ
 
+### 手：Neon Cybernetic Hand（Meshy製、骨を自動で付けた）
+
+- `models/hand.glb` には骨がないので、`tools/rig/` の手順で骨16本（手のひら＋指5本×3関節）と重みを付けて `models/hand_rigged.scn` にしている
+- メカの手は部品が分かれているので、部品ごとに1本の骨へ固定した（関節で部品が曲がらない）
+- 構えでは指を握り、カランビットを人差し指側の輪、刃を小指側から出して持つ
+- 振りは肘（拳の後ろ0.35m）を中心に回す。前腕が画面を横切らない
+- **ナイフ回し**（Y / F）：中指・薬指・小指を開き、人差し指を軸にナイフを2回転させて握り直す（1.0秒）。途中で攻撃すると止めて振る
+
+骨を付け直すとき：
+
+```sh
+pip install numpy scipy
+python3 tools/rig/analyze_hand.py                         # 関節の位置と頂点ごとの骨 → tools/rig/rig.json
+godot --headless --path . res://tools/rig/build_hand.tscn # → models/hand_rigged.scn
+```
+
+指の曲げ角は `scripts/weapon.gd` の `CURL_GRIP`（握り）と `CURL_SPIN`（ナイフ回し）で変える。
+
 ### 武器：Neon Talon（Meshy製のカランビットナイフ）
 
 `models/weapon.glb` はMeshyで作ったカランビット「Neon Talon」。`Hand` の設定でナイフの大きさにしている。
@@ -26,7 +44,7 @@
 | `grip_back` | 0.09 m | 握る位置から輪の端まで |
 | `hit_length` | 1.0 m | 判定の箱の長さ（剣のときは1.4m） |
 
-クレジット：「Neon Talon」 made with Meshy（CC BY 4.0）
+クレジット：「Neon Talon」「Neon Cybernetic Hand」 made with Meshy（CC BY 4.0）
 
 ### Meshyの武器に差し替える
 
@@ -69,6 +87,7 @@ Godot 4.6でこのフォルダを開き、F5で実行する。
 | 視点 | 右スティック | マウス / 矢印キー |
 | ジャンプ / 壁ジャンプ | A | Space |
 | 通常攻撃 | X | 左クリック / J |
+| ナイフ回し | Y | F |
 | 調整パネルの開閉 | Back（View） | F1 |
 | マウスを解放 / 再捕捉 | ― | Esc / クリック |
 
@@ -86,7 +105,7 @@ godot --headless --path . res://tests/test_hitlab.tscn
 
 `test_movement` は走り・ジャンプ・先行入力・コヨーテタイム・空中の勢い・小ジャンプ、
 `test_wallrun` は壁走りの開始・速度維持・弱い重力・上限時間・壁の端での抜け・正面衝突と低速では入らないこと・スティックで離れること・練習コースの踏破・方向転換・壁ジャンプ（向き・スティックでの向き・向かいの壁への乗り継ぎ・入る前の押しでは跳ばないこと・壁のコヨーテタイム）、
-`test_hitlab` は通常攻撃が当たること・1振り1回・ヒットストップの長さ・画面揺れの減衰・ダミーの吹き飛びと戻り・空振り・速度による威力・攻撃の先行入力・壁の前で武器を引っ込めること・ダミーで壁走りしないことを確かめる。
+`test_hitlab` は通常攻撃が当たること・ナイフ回し（2回転して元に戻る・攻撃で止まる）・手の骨と重み・1振り1回・ヒットストップの長さ・画面揺れの減衰・ダミーの吹き飛びと戻り・空振り・速度による威力・攻撃の先行入力・壁の前で武器を引っ込めること・ダミーで壁走りしないことを確かめる。
 失敗があると終了コード1で終わる。
 
 ## APKの書き出し
@@ -138,6 +157,8 @@ tools/build_apk.sh   # build/zuggle-<version>.apk ができる
 | `scripts/hit_feel.gd` | 自動読み込みの `HitFeel`。威力の計算・ヒットストップ・振動・効果音 |
 | `models/` | Meshyで作った `weapon.glb` を置く場所 |
 | `tools/build_apk.sh` | APKの書き出し（署名鍵の有無で署名を切り替える） |
+| `tools/rig/` | 手のモデルに骨と重みを付ける（`analyze_hand.py` → `build_hand.tscn`） |
+| `models/hand_rigged.scn` | 骨入りの手（`tools/rig/` で作る） |
 | `.github/workflows/release-apk.yml` | テスト→APK書き出し→GitHubのリリース |
 | `scripts/tuning.gd` | 調整値（自動読み込みの `Tuning`）。`SPECS` に足すとスライダーも増える |
 | `scripts/debug_ui.gd` | 調整パネル |

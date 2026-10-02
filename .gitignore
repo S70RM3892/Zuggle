@@ -5,3 +5,4 @@
 *.aab
 export_credentials.cfg
 build/
+tools/rig/rig.json
