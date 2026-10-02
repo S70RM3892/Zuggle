@@ -8,10 +8,7 @@ enum State { IDLE, WINDUP, ACTIVE, RECOVERY }
 
 const MODEL_PATH := "res://models/weapon.glb"
 const HURTBOX_LAYER := 2 # ダミーなど、斬られる側の当たり判定の層
-const HIT_LENGTH := 1.4 # 判定の箱の長さ（見た目の刃1.0mより少し長くして当てやすくする）
 const HIT_THICKNESS := 0.35
-const BLADE_LENGTH := 1.0
-const HANDLE_BACK := 0.12 # 握る位置から柄頭までの長さ
 const RETRACT_REACH := 1.0 # 目の前の壁がこれより近いと武器を引っ込める (m)
 const RETRACT_MAX := 0.45
 const SQUASH_STIFFNESS := 300.0
@@ -26,6 +23,12 @@ const POSE_FOLLOW := Vector3(-5.0, 80.0, -80.0)
 @export var auto_fit := true
 ## 自動で合わせた結果、柄と刃先が逆になっていたらオンにする
 @export var flip_model := false
+## Meshyのモデルを合わせるときの、柄頭から刃先までの長さ (m)
+@export var model_length := 1.12
+## 握る位置から柄頭までの長さ (m)
+@export var grip_back := 0.12
+## 判定の箱の長さ (m)。見た目の刃より少し長くして当てやすくする
+@export var hit_length := 1.4
 
 var state := State.IDLE
 var swing_count := 0
@@ -77,7 +80,7 @@ func is_attacking() -> bool:
 ## 刃に沿わせた判定の箱のワールド座標での姿勢。Gripの -Z が刃の向き。
 func hitbox_transform() -> Transform3D:
 	var g := grip.global_transform.orthonormalized()
-	return Transform3D(g.basis, g * Vector3(0.0, 0.0, -HIT_LENGTH * 0.5))
+	return Transform3D(g.basis, g * Vector3(0.0, 0.0, -hit_length * 0.5))
 
 
 func _start_swing() -> void:
@@ -134,7 +137,7 @@ func _mirror(p: Vector3) -> Vector3:
 
 func _check_hits() -> void:
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(HIT_THICKNESS, HIT_THICKNESS, HIT_LENGTH)
+	shape.size = Vector3(HIT_THICKNESS, HIT_THICKNESS, hit_length)
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = shape
 	query.transform = hitbox_transform()
@@ -221,7 +224,7 @@ func _use_model(scene: PackedScene) -> void:
 		_fit(model)
 
 
-## 一番長い辺を刃の向き(-Z)にそろえ、柄頭から刃先までを決まった長さにする。
+## 一番長い辺を刃の向き(-Z)にそろえ、柄頭から刃先までをmodel_lengthにする。
 ## 元のモデルで長い辺の小さい側を柄とみなす（立てて作った剣なら下が柄）。
 func _fit(model: Node3D) -> void:
 	var box := AABB()
@@ -243,9 +246,9 @@ func _fit(model: Node3D) -> void:
 			rot = Basis(Vector3.UP, PI) # +Z → -Z
 	if flip_model:
 		rot = Basis(Vector3.UP, PI) * rot
-	var s := (BLADE_LENGTH + HANDLE_BACK) / box.get_longest_axis_size()
+	var s := model_length / box.get_longest_axis_size()
 	var b := rot.scaled(Vector3.ONE * s)
 	var moved := Transform3D(b, Vector3.ZERO) * box
 	var center := moved.get_center()
-	var offset := Vector3(-center.x, -center.y, HANDLE_BACK - moved.end.z)
+	var offset := Vector3(-center.x, -center.y, grip_back - moved.end.z)
 	model.transform = Transform3D(b, offset) * model.transform

@@ -1,6 +1,6 @@
 class_name Player
 extends CharacterBody3D
-## 一人称プレイヤー。M1：走り・ジャンプ・コヨーテタイム・先行入力。M2：壁走り。M3：画面揺れ。
+## 一人称プレイヤー。M1：走り・ジャンプ・コヨーテタイム・先行入力。M2：壁走り（方向転換・壁ジャンプ）。M3：画面揺れ。
 ## 大原則：動作を切り替えても水平方向の速度を落とさない。
 
 const PITCH_LIMIT := deg_to_rad(89.0)
@@ -10,6 +10,7 @@ const WALL_REACH := 0.5 # 体の表面から何mまでの壁を壁走りの対�
 const WALL_MAX_NORMAL_Y := 0.3 # 法線がこれより上下を向いていたら壁とみなさない
 const WALL_STICK := 1.0 # 壁走り中に壁へ押し付ける速度 (m/s)
 const WALL_PUSH_OFF := 1.0 # 時間切れで壁から離れるときの速度 (m/s)
+const WALL_JUMP_MIN_OUT := 0.35 # スティックで向きを決めても、壁から離れる成分はこれ以上残す
 const WORLD_LAYER := 1 # 壁走りの対象にする層。ダミー（層2）では壁走りしない
 
 ## falseの間は入力を読まない（デバッグUIを開いているときなど）
@@ -23,7 +24,10 @@ var _spawn_transform: Transform3D
 
 var _wallrunning := false
 var _wallrun_time := 0.0
-var _wallrun_speed := 0.0
+var _wallrun_speed := 0.0 # 進入時の速さ。方向転換しても最後はこの速さに戻す
+var _wall_along := 0.0 # 壁沿いの速度（_wall_dir向きが正）。方向転換の途中で負になったら向きを入れ替える
+var _wall_coyote_timer := 0.0 # 壁から離れた直後も少しの間は壁ジャンプできる
+var _last_wall_normal := Vector3.ZERO
 var _wall_normal := Vector3.ZERO
 var _wall_dir := Vector3.ZERO # 壁に沿って進む向き（水平・単位ベクトル）
 var _blocked_wall_normal := Vector3.ZERO # 着地するまで同じ壁には入り直さない
@@ -58,6 +62,8 @@ func _physics_process(delta: float) -> void:
 	_update_timers(delta)
 	if _wallrunning:
 		_apply_wallrun(delta)
+		if _jump_buffer_timer > 0.0:
+			_wall_jump(_wall_normal)
 	else:
 		_apply_gravity(delta)
 		_try_jump()
@@ -80,6 +86,7 @@ func respawn() -> void:
 	head.rotation = Vector3.ZERO
 	_wallrunning = false
 	_blocked_wall_normal = Vector3.ZERO
+	_wall_coyote_timer = 0.0
 	_trauma = 0.0
 
 
@@ -125,6 +132,7 @@ func _update_timers(delta: float) -> void:
 		_blocked_wall_normal = Vector3.ZERO
 	else:
 		_coyote_timer -= delta
+	_wall_coyote_timer -= delta
 	if input_enabled and Input.is_action_just_pressed("jump"):
 		_jump_buffer_timer = Tuning.jump_buffer
 	else:
@@ -147,6 +155,8 @@ func _try_jump() -> void:
 		_jump_buffer_timer = 0.0
 		_coyote_timer = 0.0
 		_rising_from_jump = true
+	elif _jump_buffer_timer > 0.0 and _wall_coyote_timer > 0.0:
+		_wall_jump(_last_wall_normal)
 
 
 func _apply_jump_cut() -> void:
@@ -200,15 +210,26 @@ func _try_start_wallrun(before: Vector3) -> void:
 	_wallrunning = true
 	_wallrun_time = 0.0
 	_wallrun_speed = speed # 進入時の速さを、向きだけ壁沿いに変えて保つ
+	_wall_along = speed
 	_wall_normal = n
 	_wall_dir = _along_wall(n, dir)
 	_rising_from_jump = false
+	# 壁に入る前に押したジャンプで、入った瞬間に壁ジャンプしないようにする
+	_jump_buffer_timer = 0.0
 	velocity.y = Tuning.wallrun_up_speed
 
 
 func _apply_wallrun(delta: float) -> void:
 	_wallrun_time += delta
-	var h := _wall_dir * _wallrun_speed - _wall_normal * WALL_STICK
+	# 方向転換：進む向きと逆へスティックを倒すと、壁沿いに減速して折り返す。折り返した後は元の速さまで戻す
+	var target := _wallrun_speed
+	if _input_direction().dot(_wall_dir) < -0.5:
+		target = -_wallrun_speed
+	_wall_along = move_toward(_wall_along, target, Tuning.wallrun_turn_accel * delta)
+	if _wall_along < 0.0:
+		_wall_dir = -_wall_dir
+		_wall_along = -_wall_along
+	var h := _wall_dir * _wall_along - _wall_normal * WALL_STICK
 	velocity.x = h.x
 	velocity.z = h.z
 	velocity.y -= Tuning.gravity * Tuning.wallrun_gravity_mult * delta
@@ -224,7 +245,7 @@ func _check_wallrun_end() -> void:
 	elif _input_direction().dot(_wall_normal) > 0.5:
 		# 壁と反対へスティックを倒したら離れる
 		_end_wallrun()
-	elif horizontal_speed() < _wallrun_speed * 0.5:
+	elif _wall_along > 1.0 and horizontal_speed() < _wall_along * 0.5:
 		# 前の障害物にぶつかって止められた。速さは戻さない
 		_wallrunning = false
 		_blocked_wall_normal = _wall_normal
@@ -243,9 +264,31 @@ func _check_wallrun_end() -> void:
 func _end_wallrun() -> void:
 	_wallrunning = false
 	_blocked_wall_normal = _wall_normal
-	var h := _wall_dir * _wallrun_speed
+	_last_wall_normal = _wall_normal
+	_wall_coyote_timer = Tuning.coyote_time
+	var h := _wall_dir * _wall_along
 	velocity.x = h.x
 	velocity.z = h.z
+
+
+## 壁ジャンプ：壁から離れる向きと上へ跳ぶ。スティックを倒していればその向きへ跳び、速さは落とさない。
+func _wall_jump(n: Vector3) -> void:
+	var h := _wall_dir * _wall_along if _wallrunning else Vector3(velocity.x, 0.0, velocity.z)
+	var out := h + n * Tuning.wall_jump_push
+	var input := _input_direction()
+	if input.length() > 0.1:
+		# 壁へ向かう分は取り除き、必ず壁から離れる成分を残す
+		var d := input.normalized()
+		var side := d - n * d.dot(n)
+		d = (side + n * maxf(d.dot(n), WALL_JUMP_MIN_OUT)).normalized()
+		out = d * out.length()
+	velocity = Vector3(out.x, Tuning.wall_jump_up, out.z)
+	_wallrunning = false
+	_blocked_wall_normal = n
+	_wall_coyote_timer = 0.0
+	_coyote_timer = 0.0
+	_jump_buffer_timer = 0.0
+	_rising_from_jump = true
 
 
 ## 進行方向の左右にある壁の法線（水平・単位ベクトル）。なければZERO。

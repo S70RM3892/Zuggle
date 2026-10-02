@@ -188,6 +188,12 @@ use_collision = true
 size = Vector3(24, 5, 1)
 material = SubResource("mat_wall")
 
+[node name="JumpWall" type="CSGBox3D" parent="Room"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 23)
+use_collision = true
+size = Vector3(24, 5, 1)
+material = SubResource("mat_wall")
+
 [node name="WallrunCourse" type="Node3D" parent="Room"]
 
 [node name="StartPad" type="CSGBox3D" parent="Room/WallrunCourse"]
@@ -222,6 +228,10 @@ near = 0.05
 [node name="Hand" type="Node3D" parent="Player/Head/Camera3D"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.28, -0.3, -0.3)
 script = ExtResource("4_weapon")
+flip_model = true
+model_length = 0.32
+grip_back = 0.09
+hit_length = 1.0
 
 [node name="Swing" type="Node3D" parent="Player/Head/Camera3D/Hand"]
 

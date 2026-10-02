@@ -15,11 +15,24 @@
 - ダミーでは壁走りしない（壁走りは層1の地形だけ）
 - 画面揺れと振動は調整パネルで0にすればオフ
 
+### 武器：Neon Talon（Meshy製のカランビットナイフ）
+
+`models/weapon.glb` はMeshyで作ったカランビット「Neon Talon」。`Hand` の設定でナイフの大きさにしている。
+
+| 設定 | 値 | 意味 |
+| --- | --- | --- |
+| `flip_model` | オン | このモデルは長い辺の小さい側が刃先なので反転する |
+| `model_length` | 0.32 m | 輪から刃先まで |
+| `grip_back` | 0.09 m | 握る位置から輪の端まで |
+| `hit_length` | 1.0 m | 判定の箱の長さ（剣のときは1.4m） |
+
+クレジット：「Neon Talon」 made with Meshy（CC BY 4.0）
+
 ### Meshyの武器に差し替える
 
 1. MeshyのWeb版で刀を作り、GLB（Draco圧縮なし）で書き出す
 2. `models/weapon.glb` という名前で置く。あれば起動時に箱の剣と差し替わる
-3. 一番長い辺を刃の向きにそろえ、柄頭から刃先まで1.12mに自動で縮める。長い辺の小さい側（立てて作った剣なら下）を柄とみなす
+3. 一番長い辺を刃の向きにそろえ、柄頭から刃先までを `model_length` に自動で縮める。長い辺の小さい側（立てて作った剣なら下）を柄とみなす
 4. 柄と刃先が逆なら、`Player/Head/Camera3D/Hand` の `flip_model` をオンにする。握る位置と向きは `Hand/Swing/Grip` の位置と回転で微調整する
 5. 当たり判定は箱のままなので、モデルを替えても手触りは変わらない
 6. Free版で作ったモデルはCC BY 4.0。公開するときはクレジットを表記する
@@ -30,8 +43,12 @@
 - 入る条件：空中、水平速度が最低速度以上、壁との角度が上限以内（正面衝突では入らない）
 - 壁走り中は少し上向きに入り、弱い重力で弧を描く。カメラは壁と反対側へ少し傾く（0でオフ）
 - 抜け方：壁の端で勢いを保ったまま抜ける / 壁と反対へスティックを倒す / 着地する / 上限時間（初期値1.75秒）で落下
+- 方向転換：進む向きと逆へスティックを倒す（視点を振り返って前に倒してもよい）と、壁沿いに減速して折り返し、元の速さまで戻る（約0.4秒）
+- 壁ジャンプ：壁走り中にA。壁から離れる向き（5 m/s）と上（6 m/s）へ跳び、壁沿いの勢いは保つ。スティックを倒していればその向きへ跳ぶ（壁へ向けて倒しても壁からは必ず離れる）。壁を離れた直後もコヨーテタイムの間は跳べる
+- 壁に入る前に押したジャンプでは、入った瞬間に壁ジャンプしない
 - 同じ壁には着地するまで入り直さない
 - 部屋の奥の長い壁に練習コースを追加（足場2つの間が6m。壁を走らないと届かない）
+- 長い壁の裏に、4m離して平行な壁（JumpWall）を追加。壁ジャンプで左右の壁を乗り継ぐ練習用
 
 ### M1 移動
 
@@ -50,7 +67,7 @@ Godot 4.6でこのフォルダを開き、F5で実行する。
 | --- | --- | --- |
 | 移動 | 左スティック | WASD |
 | 視点 | 右スティック | マウス / 矢印キー |
-| ジャンプ | A | Space |
+| ジャンプ / 壁ジャンプ | A | Space |
 | 通常攻撃 | X | 左クリック / J |
 | 調整パネルの開閉 | Back（View） | F1 |
 | マウスを解放 / 再捕捉 | ― | Esc / クリック |
@@ -68,20 +85,43 @@ godot --headless --path . res://tests/test_hitlab.tscn
 ```
 
 `test_movement` は走り・ジャンプ・先行入力・コヨーテタイム・空中の勢い・小ジャンプ、
-`test_wallrun` は壁走りの開始・速度維持・弱い重力・上限時間・壁の端での抜け・正面衝突と低速では入らないこと・スティックで離れること・練習コースの踏破、
+`test_wallrun` は壁走りの開始・速度維持・弱い重力・上限時間・壁の端での抜け・正面衝突と低速では入らないこと・スティックで離れること・練習コースの踏破・方向転換・壁ジャンプ（向き・スティックでの向き・向かいの壁への乗り継ぎ・入る前の押しでは跳ばないこと・壁のコヨーテタイム）、
 `test_hitlab` は通常攻撃が当たること・1振り1回・ヒットストップの長さ・画面揺れの減衰・ダミーの吹き飛びと戻り・空振り・速度による威力・攻撃の先行入力・壁の前で武器を引っ込めること・ダミーで壁走りしないことを確かめる。
 失敗があると終了コード1で終わる。
 
 ## APKの書き出し
 
-Android SDK・JDK 17以上・Godot 4.6.1のエクスポートテンプレートを用意し、エディタ設定にSDKとJDKの場所を入れておく。
-署名鍵はリポジトリに入れない。環境変数で渡す。
+### GitHub Actionsでリリースする（ふだんはこちら）
+
+`.github/workflows/release-apk.yml`。GitHubのActions画面で「Release APK」→「Run workflow」を押し、ブランチを選んで実行する。
+自動テストを通してからAPKを書き出し、`export_presets.cfg` の `version/name` を名前にしたリリース（例：`v0.3.2-m3`）に載せる。
+同じ名前のリリースがあればAPKを差し替える。main以外から出したものはプレリリースになる。
+
+署名鍵はリポジトリに入れず、Settings → Secrets and variables → Actions に登録する。
+
+| Secret | 中身 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | キーストアをbase64にしたもの（`base64 -w0 zuggle-release.keystore`） |
+| `ANDROID_KEYSTORE_PASSWORD` | キーストアと鍵のパスワード（同じものにする） |
+| `ANDROID_KEY_ALIAS` | 鍵の別名 |
+
+鍵は一度だけ手元で作る：
 
 ```sh
-export GODOT_ANDROID_KEYSTORE_RELEASE_PATH=/path/to/zuggle-release.keystore
-export GODOT_ANDROID_KEYSTORE_RELEASE_USER=zuggle
-export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=...
-godot --headless --path . --export-release "Android" build/zuggle.apk
+keytool -genkeypair -keystore zuggle-release.keystore -alias zuggle -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Zuggle"
+```
+
+Secretsがなければ、リポジトリに入れた固定のデバッグ鍵 `tools/debug.keystore`（別名androiddebugkey、パスワードandroid）で署名する。
+デバッグ鍵は公開して構わない種類の鍵で、毎回同じ鍵なので上書きインストールできる。いまはこちらを使っている。
+
+### 手元で書き出す
+
+Android SDK・JDK 17以上・Godot 4.6.1のエクスポートテンプレートを用意し、`tools/build_apk.sh` を実行する（ワークフローと同じ処理）。
+
+```sh
+export GODOT=/path/to/godot ANDROID_HOME=/path/to/Android/Sdk JAVA_HOME=/path/to/jdk
+export ANDROID_KEYSTORE_BASE64=$(base64 -w0 zuggle-release.keystore) ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=zuggle
+tools/build_apk.sh   # build/zuggle-<version>.apk ができる
 ```
 
 更新版を上書きインストールするには同じ鍵で署名し、`export_presets.cfg` の `version/code` を1つ上げる。
@@ -97,6 +137,8 @@ godot --headless --path . --export-release "Android" build/zuggle.apk
 | `scripts/dummy.gd` | ダミー。ばねで吹き飛び・よろけ・伸び縮みして戻る |
 | `scripts/hit_feel.gd` | 自動読み込みの `HitFeel`。威力の計算・ヒットストップ・振動・効果音 |
 | `models/` | Meshyで作った `weapon.glb` を置く場所 |
+| `tools/build_apk.sh` | APKの書き出し（署名鍵の有無で署名を切り替える） |
+| `.github/workflows/release-apk.yml` | テスト→APK書き出し→GitHubのリリース |
 | `scripts/tuning.gd` | 調整値（自動読み込みの `Tuning`）。`SPECS` に足すとスライダーも増える |
 | `scripts/debug_ui.gd` | 調整パネル |
 | `tests/` | 自動テスト |
