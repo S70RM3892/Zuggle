@@ -35,6 +35,21 @@ godot --headless --path . res://tests/test_movement.tscn
 
 走り・ジャンプ・先行入力・コヨーテタイム・空中の勢い・小ジャンプを確かめる。失敗があると終了コード1で終わる。
 
+## APKの書き出し
+
+Android SDK・JDK 17以上・Godot 4.6.1のエクスポートテンプレートを用意し、エディタ設定にSDKとJDKの場所を入れておく。
+署名鍵はリポジトリに入れない。環境変数で渡す。
+
+```sh
+export GODOT_ANDROID_KEYSTORE_RELEASE_PATH=/path/to/zuggle-release.keystore
+export GODOT_ANDROID_KEYSTORE_RELEASE_USER=zuggle
+export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=...
+godot --headless --path . --export-release "Android" build/zuggle.apk
+```
+
+更新版を上書きインストールするには同じ鍵で署名し、`export_presets.cfg` の `version/code` を1つ上げる。
+鍵をなくすと上書きできなくなり、一度アンインストールが必要になる。
+
 ## 構成
 
 | パス | 役割 |
