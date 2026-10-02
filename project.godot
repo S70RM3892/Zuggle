@@ -20,6 +20,7 @@ config/features=PackedStringArray("4.6")
 [autoload]
 
 Tuning="*res://scripts/tuning.gd"
+HitFeel="*res://scripts/hit_feel.gd"
 
 [display]
 
@@ -82,6 +83,13 @@ jump={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"device":-1,"physical_keycode":32,"keycode":0,"unicode":32)
 , Object(InputEventJoypadButton,"device":-1,"button_index":0,"pressure":0.0,"pressed":false)
+]
+}
+attack={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"device":-1,"button_mask":0,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":1,"canceled":false,"pressed":false,"double_click":false)
+, Object(InputEventKey,"device":-1,"physical_keycode":74,"keycode":0,"unicode":106)
+, Object(InputEventJoypadButton,"device":-1,"button_index":2,"pressure":0.0,"pressed":false)
 ]
 }
 toggle_debug={

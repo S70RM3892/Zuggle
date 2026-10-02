@@ -1,6 +1,6 @@
 class_name Player
 extends CharacterBody3D
-## 一人称プレイヤー。M1：走り・ジャンプ・コヨーテタイム・先行入力。M2：壁走り。
+## 一人称プレイヤー。M1：走り・ジャンプ・コヨーテタイム・先行入力。M2：壁走り。M3：画面揺れ。
 ## 大原則：動作を切り替えても水平方向の速度を落とさない。
 
 const PITCH_LIMIT := deg_to_rad(89.0)
@@ -10,6 +10,7 @@ const WALL_REACH := 0.5 # 体の表面から何mまでの壁を壁走りの対�
 const WALL_MAX_NORMAL_Y := 0.3 # 法線がこれより上下を向いていたら壁とみなさない
 const WALL_STICK := 1.0 # 壁走り中に壁へ押し付ける速度 (m/s)
 const WALL_PUSH_OFF := 1.0 # 時間切れで壁から離れるときの速度 (m/s)
+const WORLD_LAYER := 1 # 壁走りの対象にする層。ダミー（層2）では壁走りしない
 
 ## falseの間は入力を読まない（デバッグUIを開いているときなど）
 var input_enabled := true
@@ -27,6 +28,11 @@ var _wall_normal := Vector3.ZERO
 var _wall_dir := Vector3.ZERO # 壁に沿って進む向き（水平・単位ベクトル）
 var _blocked_wall_normal := Vector3.ZERO # 着地するまで同じ壁には入り直さない
 
+var _trauma := 0.0 # 画面揺れの元。0〜1。揺れの大きさはこの2乗
+var _shake_time := 0.0
+var _roll := 0.0
+var _noise := FastNoiseLite.new()
+
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
 @onready var _body_radius: float = ($Collision.shape as CapsuleShape3D).radius
@@ -34,6 +40,8 @@ var _blocked_wall_normal := Vector3.ZERO # 着地するまで同じ壁には入�
 
 func _ready() -> void:
 	_spawn_transform = global_transform
+	_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_noise.frequency = 1.0
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -72,10 +80,20 @@ func respawn() -> void:
 	head.rotation = Vector3.ZERO
 	_wallrunning = false
 	_blocked_wall_normal = Vector3.ZERO
+	_trauma = 0.0
 
 
 func horizontal_speed() -> float:
 	return Vector2(velocity.x, velocity.z).length()
+
+
+## 画面揺れを足す。ランダムではなくノイズで滑らかに揺らし、時間で減衰させる。
+func add_trauma(amount: float) -> void:
+	_trauma = clampf(_trauma + amount, 0.0, 1.0)
+
+
+func trauma() -> float:
+	return _trauma
 
 
 func is_wall_running() -> bool:
@@ -232,8 +250,13 @@ func _end_wallrun() -> void:
 
 ## 進行方向の左右にある壁の法線（水平・単位ベクトル）。なければZERO。
 func _find_side_wall(dir: Vector3) -> Vector3:
-	if is_on_wall():
-		var n := _flat_wall_normal(get_wall_normal())
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		# CSGの壁はCollisionObject3Dではないので、層はプロパティとして読む
+		var body := c.get_collider()
+		if body == null or not (int(body.get("collision_layer")) & WORLD_LAYER):
+			continue
+		var n := _flat_wall_normal(c.get_normal())
 		if n != Vector3.ZERO:
 			return n
 	var right := dir.cross(Vector3.UP)
@@ -245,7 +268,7 @@ func _find_side_wall(dir: Vector3) -> Vector3:
 
 func _cast_wall(direction: Vector3) -> Vector3:
 	var from := global_position
-	var query := PhysicsRayQueryParameters3D.create(from, from + direction * (_body_radius + WALL_REACH))
+	var query := PhysicsRayQueryParameters3D.create(from, from + direction * (_body_radius + WALL_REACH), WORLD_LAYER)
 	query.exclude = [get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty():
@@ -283,4 +306,12 @@ func _update_camera(delta: float) -> void:
 	var roll := 0.0
 	if _wallrunning:
 		roll = -_wall_normal.dot(global_transform.basis.x) * deg_to_rad(Tuning.wallrun_tilt)
-	camera.rotation.z = lerpf(camera.rotation.z, roll, minf(1.0, 10.0 * delta))
+	_roll = lerpf(_roll, roll, minf(1.0, 10.0 * delta))
+	# 画面揺れ（トラウマ値の減衰方式）：揺れ = トラウマ²、向きはノイズで滑らかに
+	_trauma = maxf(0.0, _trauma - Tuning.shake_decay * delta)
+	_shake_time += delta * Tuning.shake_freq
+	var shake := _trauma * _trauma * deg_to_rad(Tuning.shake_max_angle)
+	camera.rotation = Vector3(
+		shake * _noise.get_noise_2d(_shake_time, 0.0),
+		shake * _noise.get_noise_2d(_shake_time, 100.0),
+		_roll + shake * 0.5 * _noise.get_noise_2d(_shake_time, 200.0))
