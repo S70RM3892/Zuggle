@@ -111,7 +111,8 @@ godot --headless --path . res://tests/test_hitlab.tscn
 keytool -genkeypair -keystore zuggle-release.keystore -alias zuggle -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Zuggle"
 ```
 
-Secretsがなければ使い捨てのデバッグ鍵で署名する。その場合は上書きインストールできない。
+Secretsがなければ、リポジトリに入れた固定のデバッグ鍵 `tools/debug.keystore`（別名androiddebugkey、パスワードandroid）で署名する。
+デバッグ鍵は公開して構わない種類の鍵で、毎回同じ鍵なので上書きインストールできる。いまはこちらを使っている。
 
 ### 手元で書き出す
 

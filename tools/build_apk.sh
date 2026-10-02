@@ -5,7 +5,8 @@
 # エクスポートテンプレート（~/.local/share/godot/export_templates/4.6.1.stable/）
 #
 # 署名：ANDROID_KEYSTORE_BASE64・ANDROID_KEYSTORE_PASSWORD・ANDROID_KEY_ALIAS がそろっていればリリース署名。
-# なければその場で作ったデバッグ鍵で署名する（毎回鍵が変わるので上書きインストールできない）。
+# なければリポジトリに入れた固定のデバッグ鍵（tools/debug.keystore、パスワードandroid）で署名する。
+# デバッグ鍵は公開して構わない種類の鍵で、毎回同じ鍵なので上書きインストールできる。
 #
 # 出力：build/zuggle-<version/name>.apk。GITHUB_OUTPUT があれば apk・version・signed を書き込む。
 set -euo pipefail
@@ -41,10 +42,8 @@ if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD:-}
 	mode=--export-release
 	signed=release
 else
-	echo "::warning::署名鍵のSecretsがないので、使い捨てのデバッグ鍵で署名する（上書きインストールできない）"
-	keytool -genkeypair -keystore "$work/debug.keystore" -alias androiddebugkey -keyalg RSA -keysize 2048 \
-		-validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US" > /dev/null 2>&1
-	export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$work/debug.keystore"
+	echo "署名鍵のSecretsがないので、固定のデバッグ鍵で署名する"
+	export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$PWD/tools/debug.keystore"
 	export GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey
 	export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android
 	mode=--export-debug

@@ -7,7 +7,7 @@
 #   ANDROID_KEYSTORE_BASE64   キーストアをbase64にしたもの（base64 -w0 zuggle-release.keystore）
 #   ANDROID_KEYSTORE_PASSWORD キーストアと鍵のパスワード（同じものにする）
 #   ANDROID_KEY_ALIAS         鍵の別名
-# 登録がなければ使い捨てのデバッグ鍵で署名する（上書きインストールできない）。
+# 登録がなければ、リポジトリに入れた固定のデバッグ鍵（tools/debug.keystore）で署名する。毎回同じ鍵なので上書きインストールできる。
 name: Release APK
 
 on:
@@ -94,7 +94,7 @@ jobs:
           if [ "$SIGNED" = "release" ]; then
             install="リリース鍵で署名。同じ鍵で署名した前のバージョンに上書きインストールできる。"
           else
-            install="使い捨てのデバッグ鍵で署名。上書きインストールできないので、前のバージョンを一度アンインストールしてから入れる。"
+            install="固定のデバッグ鍵で署名。同じ鍵で署名した前のバージョンに上書きインストールできる。"
           fi
           {
             echo "Android（arm64）向けAPK。Godot ${GODOT_VERSION}で書き出し。ブランチ ${GITHUB_REF_NAME}（${GITHUB_SHA::7}）。"
