@@ -91,14 +91,36 @@ godot --headless --path . res://tests/test_hitlab.tscn
 
 ## APKの書き出し
 
-Android SDK・JDK 17以上・Godot 4.6.1のエクスポートテンプレートを用意し、エディタ設定にSDKとJDKの場所を入れておく。
-署名鍵はリポジトリに入れない。環境変数で渡す。
+### GitHub Actionsでリリースする（ふだんはこちら）
+
+`.github/workflows/release-apk.yml`。GitHubのActions画面で「Release APK」→「Run workflow」を押し、ブランチを選んで実行する。
+自動テストを通してからAPKを書き出し、`export_presets.cfg` の `version/name` を名前にしたリリース（例：`v0.3.2-m3`）に載せる。
+同じ名前のリリースがあればAPKを差し替える。main以外から出したものはプレリリースになる。
+
+署名鍵はリポジトリに入れず、Settings → Secrets and variables → Actions に登録する。
+
+| Secret | 中身 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | キーストアをbase64にしたもの（`base64 -w0 zuggle-release.keystore`） |
+| `ANDROID_KEYSTORE_PASSWORD` | キーストアと鍵のパスワード（同じものにする） |
+| `ANDROID_KEY_ALIAS` | 鍵の別名 |
+
+鍵は一度だけ手元で作る：
 
 ```sh
-export GODOT_ANDROID_KEYSTORE_RELEASE_PATH=/path/to/zuggle-release.keystore
-export GODOT_ANDROID_KEYSTORE_RELEASE_USER=zuggle
-export GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=...
-godot --headless --path . --export-release "Android" build/zuggle.apk
+keytool -genkeypair -keystore zuggle-release.keystore -alias zuggle -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Zuggle"
+```
+
+Secretsがなければ使い捨てのデバッグ鍵で署名する。その場合は上書きインストールできない。
+
+### 手元で書き出す
+
+Android SDK・JDK 17以上・Godot 4.6.1のエクスポートテンプレートを用意し、`tools/build_apk.sh` を実行する（ワークフローと同じ処理）。
+
+```sh
+export GODOT=/path/to/godot ANDROID_HOME=/path/to/Android/Sdk JAVA_HOME=/path/to/jdk
+export ANDROID_KEYSTORE_BASE64=$(base64 -w0 zuggle-release.keystore) ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=zuggle
+tools/build_apk.sh   # build/zuggle-<version>.apk ができる
 ```
 
 更新版を上書きインストールするには同じ鍵で署名し、`export_presets.cfg` の `version/code` を1つ上げる。
@@ -114,6 +136,8 @@ godot --headless --path . --export-release "Android" build/zuggle.apk
 | `scripts/dummy.gd` | ダミー。ばねで吹き飛び・よろけ・伸び縮みして戻る |
 | `scripts/hit_feel.gd` | 自動読み込みの `HitFeel`。威力の計算・ヒットストップ・振動・効果音 |
 | `models/` | Meshyで作った `weapon.glb` を置く場所 |
+| `tools/build_apk.sh` | APKの書き出し（署名鍵の有無で署名を切り替える） |
+| `.github/workflows/release-apk.yml` | テスト→APK書き出し→GitHubのリリース |
 | `scripts/tuning.gd` | 調整値（自動読み込みの `Tuning`）。`SPECS` に足すとスライダーも増える |
 | `scripts/debug_ui.gd` | 調整パネル |
 | `tests/` | 自動テスト |

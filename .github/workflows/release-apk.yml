@@ -1,0 +1,108 @@
+# テストを通してからAndroid APKを書き出し、GitHubのリリースに載せる。
+# Actions画面の「Run workflow」で、ビルドしたいブランチを選んで実行する。
+# リリース名は export_presets.cfg の version/name（例：v0.3.2-m3）。同じ名前のリリースがあればAPKを差し替える。
+# main以外のブランチから出したものは「プレリリース」になる。
+#
+# 署名鍵（Settings → Secrets and variables → Actions に登録）：
+#   ANDROID_KEYSTORE_BASE64   キーストアをbase64にしたもの（base64 -w0 zuggle-release.keystore）
+#   ANDROID_KEYSTORE_PASSWORD キーストアと鍵のパスワード（同じものにする）
+#   ANDROID_KEY_ALIAS         鍵の別名
+# 登録がなければ使い捨てのデバッグ鍵で署名する（上書きインストールできない）。
+name: Release APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: 4.6.1
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDKを用意
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "build-tools;35.0.1" "platforms;android-35" > /dev/null
+
+      - name: Godotとエクスポートテンプレートのキャッシュ
+        id: godot-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-android
+
+      - name: Godotとエクスポートテンプレートを取得
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          mkdir -p ~/godot
+          curl -fsSL -o /tmp/godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 ~/godot/godot
+          curl -fsSL -o /tmp/templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p "$dest"
+          unzip -q /tmp/templates.tpz 'templates/android_*' 'templates/version.txt' -d /tmp/tpl
+          mv /tmp/tpl/templates/* "$dest/"
+
+      - name: 自動テスト
+        run: |
+          ~/godot/godot --headless --path . --import > /dev/null 2>&1 || true
+          for t in movement wallrun hitlab; do
+            echo "::group::test_$t"
+            timeout 300 ~/godot/godot --headless --path . "res://tests/test_$t.tscn"
+            echo "::endgroup::"
+          done
+
+      - name: APKを書き出す
+        id: build
+        env:
+          GODOT: /home/runner/godot/godot
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: tools/build_apk.sh
+
+      - name: リリースに載せる
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.build.outputs.apk }}
+          VERSION: ${{ steps.build.outputs.version }}
+          SIGNED: ${{ steps.build.outputs.signed }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" "$APK" --clobber
+            exit 0
+          fi
+          prerelease=()
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            prerelease=(--prerelease)
+          fi
+          if [ "$SIGNED" = "release" ]; then
+            install="リリース鍵で署名。同じ鍵で署名した前のバージョンに上書きインストールできる。"
+          else
+            install="使い捨てのデバッグ鍵で署名。上書きインストールできないので、前のバージョンを一度アンインストールしてから入れる。"
+          fi
+          {
+            echo "Android（arm64）向けAPK。Godot ${GODOT_VERSION}で書き出し。ブランチ ${GITHUB_REF_NAME}（${GITHUB_SHA::7}）。"
+            echo
+            echo "$install"
+            echo
+            echo "変更点は README と仕様書の改善ログを参照。"
+            echo
+            echo "クレジット：「Neon Talon」 made with Meshy（CC BY 4.0）"
+          } > /tmp/notes.md
+          gh release create "$tag" "$APK" --target "$GITHUB_SHA" --title "Zuggle $VERSION" --notes-file /tmp/notes.md "${prerelease[@]}"
