@@ -30,6 +30,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if visible:
 		_speed_label.text = "水平速度 %.2f m/s" % _player.horizontal_speed()
+		if _player.is_wall_running():
+			_speed_label.text += "　壁走り中（残り %.2f 秒）" % _player.wallrun_time_left()
 
 
 func _set_open(open: bool) -> void:

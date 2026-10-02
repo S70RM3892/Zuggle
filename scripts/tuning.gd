@@ -21,6 +21,12 @@ const SPECS := [
 	["mouse_sensitivity", "マウス感度 (度/px)", 0.01, 0.5, 0.01],
 	["fov", "視野角 (度)", 60.0, 120.0, 1.0],
 	["head_bob", "頭の揺れ (m, 0でオフ)", 0.0, 0.1, 0.005],
+	["wallrun_min_speed", "壁走りに入る最低速度 (m/s)", 0.0, 15.0, 0.1],
+	["wallrun_max_angle", "壁走りに入れる壁との角度 (度)", 10.0, 90.0, 1.0],
+	["wallrun_max_time", "壁走りの継続時間の上限 (秒)", 0.2, 5.0, 0.05],
+	["wallrun_up_speed", "壁走り開始時の上向き速度 (m/s)", 0.0, 8.0, 0.1],
+	["wallrun_gravity_mult", "壁走り中の重力倍率", 0.0, 1.0, 0.01],
+	["wallrun_tilt", "壁走り中のカメラの傾き (度, 0でオフ)", 0.0, 20.0, 0.5],
 ]
 
 var max_speed := 8.0
@@ -40,6 +46,12 @@ var look_curve := 1.6
 var mouse_sensitivity := 0.12
 var fov := 90.0
 var head_bob := 0.015
+var wallrun_min_speed := 4.0
+var wallrun_max_angle := 60.0 # 壁に対して正面に近い角度で当たったら壁走りにしない
+var wallrun_max_time := 1.75 # 初代Titanfallの値
+var wallrun_up_speed := 2.0
+var wallrun_gravity_mult := 0.25
+var wallrun_tilt := 6.0 # 一人称では酔いに直結するので控えめ
 
 var _defaults := {}
 
