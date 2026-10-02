@@ -60,7 +60,7 @@ jobs:
       - name: 自動テスト
         run: |
           ~/godot/godot --headless --path . --import > /dev/null 2>&1 || true
-          for t in movement wallrun hitlab; do
+          for t in movement wallrun hitlab slash; do
             echo "::group::test_$t"
             timeout 300 ~/godot/godot --headless --path . "res://tests/test_$t.tscn"
             echo "::endgroup::"
@@ -103,6 +103,6 @@ jobs:
             echo
             echo "変更点は README と仕様書の改善ログを参照。"
             echo
-            echo "クレジット：「Neon Talon」「Neon Cybernetic Hand」 made with Meshy（CC BY 4.0）"
+            echo "クレジット：「Neon Talon」「Neon Cybernetic Hand」と訓練ロボット made with Meshy（CC BY 4.0）"
           } > /tmp/notes.md
           gh release create "$tag" "$APK" --target "$GITHUB_SHA" --title "Zuggle $VERSION" --notes-file /tmp/notes.md "${prerelease[@]}"

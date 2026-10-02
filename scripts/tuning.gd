@@ -34,6 +34,13 @@ const SPECS := [
 	["attack_windup", "攻撃の振りかぶり (秒)", 0.0, 0.3, 0.01],
 	["attack_active", "攻撃の判定時間 (秒)", 0.02, 0.3, 0.01],
 	["attack_recovery", "攻撃の戻り (秒)", 0.0, 0.5, 0.01],
+	["slash_window", "アナログ斬り 弾きの受付 (秒)", 0.03, 0.4, 0.01],
+	["slash_full_speed", "アナログ斬り 最大の強さになる弾きの速さ (/秒)", 5.0, 60.0, 1.0],
+	["slash_power_min", "アナログ斬り 弱い弾きの基本威力", 0.2, 2.0, 0.05],
+	["slash_power_max", "アナログ斬り 強い弾きの基本威力", 0.2, 3.0, 0.05],
+	["slash_active_slow", "アナログ斬り 弱い弾きの判定時間 (秒)", 0.02, 0.4, 0.01],
+	["slash_active_fast", "アナログ斬り 強い弾きの判定時間 (秒)", 0.02, 0.4, 0.01],
+	["slash_mouse_px", "アナログ斬り マウスで端まで倒す距離 (px)", 20.0, 600.0, 5.0],
 	["hitstop_min", "ヒットストップ 威力最小 (秒)", 0.0, 0.3, 0.005],
 	["hitstop_max", "ヒットストップ 威力最大 (秒)", 0.0, 0.3, 0.005],
 	["shake_trauma", "画面揺れ 1発のトラウマ値 (0でオフ)", 0.0, 1.0, 0.01],
@@ -81,6 +88,13 @@ var attack_buffer := 0.12
 var attack_windup := 0.05
 var attack_active := 0.10
 var attack_recovery := 0.15
+var slash_window := 0.15 # これより遅く倒したら弾きとみなさない
+var slash_full_speed := 25.0 # 中心から端まで約0.035秒で最大の強さ
+var slash_power_min := 0.8
+var slash_power_max := 1.4
+var slash_active_slow := 0.14 # 強く弾くほど速く振り抜く
+var slash_active_fast := 0.06
+var slash_mouse_px := 120.0
 var hitstop_min := 0.05 # 仕様の初期値50〜100msを威力で割り振る
 var hitstop_max := 0.10
 var shake_trauma := 0.35 # 一人称では酔いに直結するので小さめから
