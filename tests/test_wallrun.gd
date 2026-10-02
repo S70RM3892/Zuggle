@@ -30,6 +30,12 @@ func _run() -> void:
 	await _test_stick_away_detaches()
 	await _test_jump_into_wall()
 	await _test_course()
+	await _test_turn_around()
+	await _test_wall_jump()
+	await _test_wall_jump_steer()
+	await _test_wall_jump_to_opposite_wall()
+	await _test_early_press_does_not_jump_off()
+	await _test_wall_coyote()
 	print("\n%s" % ("ALL PASSED" if _failures == 0 else "%d FAILED" % _failures))
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -193,4 +199,117 @@ func _test_course() -> void:
 	_check(ran, "途中で壁走りした")
 	var pos := _player.global_position
 	_check(_player.is_on_floor() and pos.x > 3.0 and pos.y > 1.5, "EndPadに着地 (%.2f, %.2f)" % [pos.x, pos.y])
+	_release_all()
+
+
+func _press_jump() -> void:
+	Input.action_press("jump")
+	await _frames(2)
+
+
+func _test_turn_around() -> void:
+	print("壁走り中の方向転換")
+	await _launch(Vector3(-2, 3, WALL_SIDE_Z), Vector3(8, 0, 0))
+	await _frames(3)
+	_check(_player.is_wall_running(), "入る")
+	# yaw -90度では、後ろ(move_back)が-X＝進む向きと逆
+	Input.action_press("move_back")
+	var reversed := false
+	for i in int(0.8 / DT):
+		await get_tree().physics_frame
+		if _player.velocity.x < -7.9:
+			reversed = true
+			break
+	Input.action_release("move_back")
+	_check(reversed, "逆へ倒すと折り返す")
+	_check(_player.is_wall_running(), "折り返しても壁走りが続く")
+	_check(absf(_player.horizontal_speed() - 8.0) < 0.1, "折り返した後は元の速さに戻る (%.2f)" % _player.horizontal_speed())
+
+
+func _test_wall_jump() -> void:
+	print("壁ジャンプ")
+	await _launch(Vector3(-10, 3, WALL_SIDE_Z), Vector3(8, 0, 0))
+	await _frames(10)
+	_check(_player.is_wall_running(), "入る")
+	await _press_jump()
+	_check(not _player.is_wall_running(), "壁から離れる")
+	_check(_player.velocity.y > Tuning.wall_jump_up * 0.9, "上へ跳ぶ (vy %.2f)" % _player.velocity.y)
+	_check(_player.velocity.z < -Tuning.wall_jump_push * 0.9, "壁と反対(-Z)へ跳ぶ (vz %.2f)" % _player.velocity.z)
+	_check(_player.velocity.x > 7.9, "壁沿いの勢いを保つ (vx %.2f)" % _player.velocity.x)
+	Input.action_release("jump")
+	await _frames(int(0.3 / DT))
+	_check(not _player.is_wall_running(), "同じ壁にすぐ貼り付かない")
+
+
+func _test_wall_jump_steer() -> void:
+	print("スティックの向きへ壁ジャンプ")
+	await _launch(Vector3(-2, 3, WALL_SIDE_Z), Vector3(8, 0, 0))
+	await _frames(10)
+	var before := Vector3(_player.velocity.x, 0, _player.velocity.z).length()
+	# 後ろ(-X)へ倒したまま跳ぶ。折り返しが始まる前に跳ぶ
+	Input.action_press("move_back")
+	await _press_jump()
+	var h := Vector3(_player.velocity.x, 0, _player.velocity.z)
+	_check(h.x < -1.0 and h.z < 0.0, "倒した向き（後ろ）へ跳ぶ (%.2f, %.2f)" % [h.x, h.z])
+	_check(h.length() >= before - 0.1, "速さを落とさない (%.2f → %.2f)" % [before, h.length()])
+	_release_all()
+	# 壁へ向けて倒しても、壁から離れる成分は残る
+	await _launch(Vector3(-2, 3, WALL_SIDE_Z), Vector3(8, 0, 0))
+	await _frames(10)
+	Input.action_press("move_right") # yaw -90度では右が+Z＝壁の方
+	await _press_jump()
+	_check(_player.velocity.z < -0.5, "壁に向けて倒しても壁から離れる (vz %.2f)" % _player.velocity.z)
+	_release_all()
+
+
+func _test_wall_jump_to_opposite_wall() -> void:
+	print("壁ジャンプで向かいの壁へ乗り継ぐ")
+	# RunWallの裏側（面はz=18.5）とJumpWall（面はz=22.5）の間は4m。裏側の面に沿って走らせる
+	await _launch(Vector3(-10, 4, 18.5 + 0.35 + 0.05), Vector3(8, 0, 0))
+	await _frames(10)
+	_check(_player.is_wall_running(), "入る")
+	# 前と右（+Z＝向かいの壁の方）の斜めに倒して跳ぶ。真横に跳ぶと正面衝突になり壁走りしない
+	Input.action_press("move_forward")
+	Input.action_press("move_right")
+	await _press_jump()
+	Input.action_release("jump")
+	var ran := false
+	for i in int(2.0 / DT):
+		await get_tree().physics_frame
+		if _player.is_wall_running():
+			ran = true
+			break
+	_check(ran and _player.global_position.z > 21.0, "向かいの壁で壁走りに入る (z %.2f)" % _player.global_position.z)
+	_release_all()
+
+
+func _test_early_press_does_not_jump_off() -> void:
+	print("壁に入る直前の押しでは跳ばない")
+	# 壁を検知する距離（体の表面から0.5m）の少し外から斜めに寄せ、押してから数フレーム後、
+	# 先行入力の受付時間の内側で壁に入るようにする
+	await _launch(Vector3(-10, 3, WALL_SIDE_Z - 0.6), Vector3(8, 0, 3))
+	Input.action_press("jump") # 入る前に押して、押しっぱなし
+	await _frames(int(0.2 / DT))
+	_check(_player.is_wall_running(), "壁走りが続く")
+	_release_all()
+
+
+func _test_wall_coyote() -> void:
+	print("壁を離れた直後の壁ジャンプ")
+	await _launch(Vector3(-10, 3, WALL_SIDE_Z), Vector3(8, 0, 0))
+	await _frames(10)
+	Input.action_press("move_left") # 壁から離れる
+	await _frames(3)
+	_check(not _player.is_wall_running(), "離れる")
+	Input.action_release("move_left")
+	await _press_jump()
+	_check(_player.velocity.y > Tuning.wall_jump_up * 0.9, "離れた直後なら壁ジャンプできる (vy %.2f)" % _player.velocity.y)
+	_release_all()
+	await _launch(Vector3(-10, 3, WALL_SIDE_Z), Vector3(8, 0, 0))
+	await _frames(10)
+	Input.action_press("move_left")
+	await _frames(int(Tuning.coyote_time / DT) + 6)
+	Input.action_release("move_left")
+	await _press_jump()
+	_check(_player.velocity.y < 0.0, "時間を過ぎたら跳べない (vy %.2f)" % _player.velocity.y)
 	_release_all()

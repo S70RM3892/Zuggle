@@ -188,6 +188,12 @@ use_collision = true
 size = Vector3(24, 5, 1)
 material = SubResource("mat_wall")
 
+[node name="JumpWall" type="CSGBox3D" parent="Room"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 23)
+use_collision = true
+size = Vector3(24, 5, 1)
+material = SubResource("mat_wall")
+
 [node name="WallrunCourse" type="Node3D" parent="Room"]
 
 [node name="StartPad" type="CSGBox3D" parent="Room/WallrunCourse"]

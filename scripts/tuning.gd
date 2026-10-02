@@ -27,6 +27,9 @@ const SPECS := [
 	["wallrun_up_speed", "壁走り開始時の上向き速度 (m/s)", 0.0, 8.0, 0.1],
 	["wallrun_gravity_mult", "壁走り中の重力倍率", 0.0, 1.0, 0.01],
 	["wallrun_tilt", "壁走り中のカメラの傾き (度, 0でオフ)", 0.0, 20.0, 0.5],
+	["wallrun_turn_accel", "壁走りの折り返しの速さ (m/s²)", 5.0, 200.0, 1.0],
+	["wall_jump_push", "壁ジャンプの離れる速さ (m/s)", 0.0, 15.0, 0.1],
+	["wall_jump_up", "壁ジャンプの上向き速度 (m/s)", 0.0, 15.0, 0.1],
 	["attack_buffer", "攻撃の先行入力 (秒)", 0.0, 0.3, 0.01],
 	["attack_windup", "攻撃の振りかぶり (秒)", 0.0, 0.3, 0.01],
 	["attack_active", "攻撃の判定時間 (秒)", 0.02, 0.3, 0.01],
@@ -71,6 +74,9 @@ var wallrun_max_time := 1.75 # 初代Titanfallの値
 var wallrun_up_speed := 2.0
 var wallrun_gravity_mult := 0.25
 var wallrun_tilt := 6.0 # 一人称では酔いに直結するので控えめ
+var wallrun_turn_accel := 40.0 # 8 m/sなら約0.4秒で折り返す
+var wall_jump_push := 5.0
+var wall_jump_up := 6.0
 var attack_buffer := 0.12
 var attack_windup := 0.05
 var attack_active := 0.10
