@@ -228,6 +228,10 @@ near = 0.05
 [node name="Hand" type="Node3D" parent="Player/Head/Camera3D"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.28, -0.3, -0.3)
 script = ExtResource("4_weapon")
+flip_model = true
+model_length = 0.32
+grip_back = 0.09
+hit_length = 1.0
 
 [node name="Swing" type="Node3D" parent="Player/Head/Camera3D/Hand"]
 
