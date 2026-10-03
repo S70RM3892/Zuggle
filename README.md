@@ -98,9 +98,19 @@ Godot 4.6でこのフォルダを開き、F5で実行する。
 ## テスト
 
 ```sh
+tools/dev.sh check          # Godotがなければ入れる → 全スクリプトのlint → 3つのテストを並列（30秒台）
+tools/dev.sh test hitlab    # 1つだけ回す（movement / wallrun / hitlab）
+tools/dev.sh bump 0.3.4-m3  # version/code を1つ上げ、version/name を変える
+```
+
+pushとプルリクエストのたびに GitHub Actions の「Test」が同じ `tools/dev.sh check` を回す。
+Claude Codeでは `/check` で、落ちたテストを直して全部通るまで繰り返させられる。
+クラウドのセッションでは開始時にGodotを自動で入れる（`.claude/settings.json` のSessionStartフック）。
+
+1本ずつ直接回すなら：
+
+```sh
 godot --headless --path . res://tests/test_movement.tscn
-godot --headless --path . res://tests/test_wallrun.tscn
-godot --headless --path . res://tests/test_hitlab.tscn
 ```
 
 `test_movement` は走り・ジャンプ・先行入力・コヨーテタイム・空中の勢い・小ジャンプ、
@@ -113,7 +123,7 @@ godot --headless --path . res://tests/test_hitlab.tscn
 ### GitHub Actionsでリリースする（ふだんはこちら）
 
 `.github/workflows/release-apk.yml`。GitHubのActions画面で「Release APK」→「Run workflow」を押し、ブランチを選んで実行する。
-自動テストを通してからAPKを書き出し、`export_presets.cfg` の `version/name` を名前にしたリリース（例：`v0.3.2-m3`）に載せる。
+lintと自動テスト（`tools/dev.sh check`）を通してからAPKを書き出し、`export_presets.cfg` の `version/name` を名前にしたリリース（例：`v0.3.2-m3`）に載せる。
 同じ名前のリリースがあればAPKを差し替える。main以外から出したものはプレリリースになる。
 
 署名鍵はリポジトリに入れず、Settings → Secrets and variables → Actions に登録する。
@@ -163,6 +173,10 @@ tools/build_apk.sh   # build/zuggle-<version>.apk ができる
 | `scripts/tuning.gd` | 調整値（自動読み込みの `Tuning`）。`SPECS` に足すとスライダーも増える |
 | `scripts/debug_ui.gd` | 調整パネル |
 | `tests/` | 自動テスト |
+| `tools/dev.sh` | Godotの導入・lint・テスト・版上げをまとめたコマンド |
+| `tools/lint.tscn` | 全スクリプトを読み込んで文法・型のエラーを出す |
+| `.github/workflows/test.yml` | push・プルリクエストごとのlintとテスト |
+| `.claude/` | セッション開始時のGodot導入フックと `/check` スキル |
 
 ## Claude CodeとGodot MCP
 
