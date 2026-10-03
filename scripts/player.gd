@@ -1,6 +1,7 @@
 class_name Player
 extends CharacterBody3D
 ## 一人称プレイヤー。M1：走り・ジャンプ・コヨーテタイム・先行入力。M2：壁走り（方向転換・壁ジャンプ）。M3：画面揺れ。
+## M4：斬撃モード（RT / 右クリックを押している間）は、右スティックとマウスを視点ではなくアナログ斬りに使う。
 ## 大原則：動作を切り替えても水平方向の速度を落とさない。
 
 const PITCH_LIMIT := deg_to_rad(89.0)
@@ -49,7 +50,7 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not input_enabled:
+	if not input_enabled or slash_mode():
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var deg_per_px := Tuning.mouse_sensitivity
@@ -57,7 +58,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if input_enabled:
+	if input_enabled and not slash_mode():
 		_process_stick_look(delta)
 	_update_timers(delta)
 	if _wallrunning:
@@ -88,6 +89,11 @@ func respawn() -> void:
 	_blocked_wall_normal = Vector3.ZERO
 	_wall_coyote_timer = 0.0
 	_trauma = 0.0
+
+
+## 斬撃モード：RT / 右クリックを押している間。右スティックとマウスがアナログ斬りになる。
+func slash_mode() -> bool:
+	return input_enabled and Input.is_action_pressed("slash_mode")
 
 
 func horizontal_speed() -> float:

@@ -1,7 +1,7 @@
 class_name Weapon
 extends Node3D
 ## 一人称の手と武器。通常攻撃（X / 左クリック）の振り、当たり判定、伸び縮み、壁へのめり込み防止、
-## ナイフ回し（Y / F）。
+## ナイフ回し（Y / F）。M4：アナログ斬り（RT / 右クリックを押しながら右スティック / マウスを弾く）。
 ## 手は Swing/HandModel（骨入りのメカの手）、武器は Swing/Grip の下に置く。
 ## res://models/weapon.glb があればそれを、なければ箱の剣を使う。
 ## 当たり判定は見た目のメッシュを使わず、Swing の前(-Z)へ伸ばした細長い箱で取る。
@@ -81,6 +81,17 @@ const PATTERNS := [
 		"side": 0.0,
 	},
 ]
+# アナログ斬りの振り：右から左への水平な振り。視線の軸まわりに傾けて、弾いた向きにする。
+# 左から右へ斬るときは左右を反転した振り（_mirror_pattern）を使う
+const SLASH_PATTERN := {
+	"windup": [Vector3(5.0, -60.0, -80.0), Vector3(0.0, 0.0, 0.03)],
+	"mid": [Vector3(2.0, 0.0, -82.0), Vector3(0.0, 0.0, -0.1)],
+	"finish": [Vector3(-5.0, 60.0, -80.0), Vector3(0.0, 0.0, -0.02)],
+	"follow": [Vector3(-8.0, 66.0, -82.0), Vector3(0.0, 0.0, 0.0)],
+	"side": 1.0,
+}
+const SLASH_WINDUP := 0.03 # アナログ斬りはスティックを弾く動きが振りかぶりなので短い
+const MOUSE_RETURN := 6.0 # マウスで動かした仮想スティックが中心へ戻る速さ (/秒)
 const COMBO_RESET := 0.5 # 振り終わってからこれだけ空くと1の型に戻る (秒)
 const FOLLOW_PART := 0.35 # 戻りのうち、行き過ぎに使う割合
 
@@ -114,11 +125,26 @@ var state := State.IDLE
 var swing_count := 0
 var inspect_count := 0
 var using_model := false
+var slash_count := 0
+## 直前のアナログ斬り：dir（画面上の向き、上が+y）、strength（0〜1）、roll（振りの面の傾き、ラジアン）、at（msec）
+var last_slash := {}
 
 var _t := 0.0
 var _buffer := 0.0
 var combo := 0 # 今の振りの型（PATTERNS の番号）
 var _since_swing := 99.0
+var _pattern: Dictionary = PATTERNS[0] # 今の振り
+var _analog := false # いまの振りがアナログ斬りか
+var _slash_dir := Vector2.ZERO
+var _slash_strength := 0.0
+var _roll := 0.0 # 振りの面を視線の軸まわりに傾ける角度
+var _roll_from := 0.0
+var _roll_target := 0.0
+var _flick := FlickDetector.new()
+var _slash_buffer := 0.0
+var _pending_slash := {}
+var _mouse_stick := Vector2.ZERO
+var _stick := Vector2.ZERO
 var _from_rot := IDLE_ROT
 var _from_pos := Vector3.ZERO
 var _rot := IDLE_ROT # 今の姿勢
@@ -177,12 +203,24 @@ func _ready() -> void:
 	_make_trail()
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion and slash_mode_active():
+		# マウスは仮想スティックとして扱う。素早く動かすと端まで届いて弾きになる
+		_mouse_stick = (_mouse_stick + event.relative / maxf(Tuning.slash_mouse_px, 1.0)).limit_length(1.0)
+
+
 func _physics_process(delta: float) -> void:
 	if _player and _player.input_enabled and Input.is_action_just_pressed("attack"):
 		_buffer = Tuning.attack_buffer
 	else:
 		_buffer -= delta
-	if _buffer > 0.0 and (state == State.IDLE or state == State.RECOVERY or state == State.INSPECT):
+	_read_flick(delta)
+	var can_start := state == State.IDLE or state == State.RECOVERY or state == State.INSPECT
+	if _slash_buffer > 0.0 and can_start:
+		_slash_buffer = 0.0
+		_buffer = 0.0
+		_start_slash(_pending_slash.dir, _pending_slash.strength)
+	elif _buffer > 0.0 and can_start:
 		_buffer = 0.0
 		_start_swing() # ナイフ回しの途中でも攻撃を優先する
 	elif state == State.IDLE and _player and _player.input_enabled and Input.is_action_just_pressed("inspect"):
@@ -209,6 +247,38 @@ func is_inspecting() -> bool:
 	return state == State.INSPECT
 
 
+func is_slashing() -> bool:
+	return _analog and is_attacking()
+
+
+func slash_mode_active() -> bool:
+	return _player != null and _player.slash_mode()
+
+
+## 斬撃モード中のスティック（マウスの仮想スティックを足したもの）。右が+x、下が+y。HUD用
+func slash_stick() -> Vector2:
+	return _stick
+
+
+## 斬撃モードの間、スティックの弾きを見つけてアナログ斬りを出す（振っている途中なら先行入力にする）。
+func _read_flick(delta: float) -> void:
+	_mouse_stick = _mouse_stick.move_toward(Vector2.ZERO, MOUSE_RETURN * delta)
+	_slash_buffer -= delta
+	if not slash_mode_active():
+		_flick.reset()
+		_mouse_stick = Vector2.ZERO
+		_stick = Vector2.ZERO
+		return
+	var v := Input.get_vector("look_left", "look_right", "look_up", "look_down", Tuning.stick_deadzone)
+	_stick = (v + _mouse_stick).limit_length(1.0)
+	var f := _flick.feed(_stick, delta, Tuning.slash_window)
+	if f.is_empty():
+		return
+	var strength := clampf(f.speed / maxf(Tuning.slash_full_speed, 0.01), 0.0, 1.0)
+	_pending_slash = {"dir": f.dir, "strength": strength}
+	_slash_buffer = Tuning.attack_buffer
+
+
 ## 握った状態のナイフ（Grip）の姿勢と、ナイフ回しの軸。どちらも Swing の座標。
 func grip_rest() -> Transform3D:
 	return _grip_rest
@@ -232,10 +302,33 @@ func _start_inspect() -> void:
 	state = State.INSPECT
 
 
+## アナログ斬り：dirは画面上で刃を動かす向き（上が+y）、strengthは弾きの強さ（0〜1）。
+## 水平な振り（右から左）を、視線の軸まわりに傾けて dir の向きにする。手首が裏返らないよう、
+## 右へ斬るときは左から右の振りを使い、傾きは±90度に収める。
+func _start_slash(dir: Vector2, strength: float) -> void:
+	slash_count += 1
+	var right_to_left := dir.x <= 0.0
+	_begin_swing(SLASH_PATTERN if right_to_left else _mirror_pattern(SLASH_PATTERN))
+	_analog = true
+	_slash_dir = dir
+	_slash_strength = strength
+	# 右から左の振り(-1, 0)を角度rollだけ反時計回りに回すと(-cos, -sin)、左から右なら(cos, sin)
+	_roll_target = atan2(-dir.y, -dir.x) if right_to_left else atan2(dir.y, dir.x)
+	last_slash = {"dir": dir, "strength": strength, "roll": _roll_target, "at": Time.get_ticks_msec()}
+
+
 func _start_swing() -> void:
 	swing_count += 1
 	combo = (combo + 1) % PATTERNS.size() if _since_swing < COMBO_RESET and swing_count > 1 else 0
+	_begin_swing(PATTERNS[combo])
+
+
+func _begin_swing(pattern: Dictionary) -> void:
+	_pattern = pattern
 	_since_swing = 0.0
+	_analog = false
+	_roll_from = _roll
+	_roll_target = 0.0
 	_hit_ids.clear()
 	_capture_from()
 	_trail_points.clear()
@@ -250,21 +343,26 @@ func _advance(delta: float) -> void:
 	if state == State.IDLE:
 		_rot = IDLE_ROT
 		_pos = Vector3.ZERO
+		_roll = 0.0
 		return
 	_t += delta
-	var p: Dictionary = PATTERNS[combo]
+	var p := _pattern
+	var windup_time := SLASH_WINDUP if _analog else Tuning.attack_windup
+	var active_time := _active_time()
 	match state:
 		State.WINDUP:
-			var x := _ease_out(_ratio(Tuning.attack_windup))
+			var x := _ease_out(_ratio(windup_time))
 			_set_pose(_from_rot.lerp(p.windup[0], x), _from_pos.lerp(p.windup[1], x))
-			if _t >= Tuning.attack_windup:
+			_roll = lerp_angle(_roll_from, _roll_target, x)
+			if _t >= windup_time:
 				_next(State.ACTIVE)
 				HitFeel.play_swing()
 		State.ACTIVE:
 			# 判定の間は、中間を通る弧に沿って振り抜く。入りで加速し、終わりで少し緩める
-			var x := _snap(_ratio(Tuning.attack_active))
+			var x := _snap(_ratio(active_time))
 			_set_pose(_arc(p.windup[0], p.mid[0], p.finish[0], x), _arc(p.windup[1], p.mid[1], p.finish[1], x))
-			if _t >= Tuning.attack_active:
+			_roll = _roll_target
+			if _t >= active_time:
 				_next(State.RECOVERY)
 		State.RECOVERY:
 			# 行き過ぎてから構えに戻る。最後はばねで落ち着かせる（_update_settle）
@@ -275,7 +373,9 @@ func _advance(delta: float) -> void:
 			else:
 				var k := smoothstep(0.0, 1.0, (x - FOLLOW_PART) / (1.0 - FOLLOW_PART))
 				_set_pose(Vector3(p.follow[0]).lerp(IDLE_ROT, k), Vector3(p.follow[1]).lerp(Vector3.ZERO, k))
+			_roll = lerp_angle(_roll_target, 0.0, smoothstep(0.0, 1.0, x))
 			if x >= 1.0:
+				_analog = false
 				_next(State.IDLE)
 				_kick_settle(p)
 		State.INSPECT:
@@ -290,6 +390,23 @@ func _advance(delta: float) -> void:
 				_open = 0.0
 				_bend = Vector3.ZERO
 				_next(State.IDLE)
+
+
+## 判定の時間。アナログ斬りは強く弾くほど速く振り抜く。
+func _active_time() -> float:
+	if not _analog:
+		return Tuning.attack_active
+	return lerpf(Tuning.slash_active_slow, Tuning.slash_active_fast, _slash_strength)
+
+
+## 振りを左右反転する（刃先の左右とひねり、拳の左右のずれを逆にする）。
+func _mirror_pattern(p: Dictionary) -> Dictionary:
+	var m := {"side": -float(p.side)}
+	for key in ["windup", "mid", "finish", "follow"]:
+		var r: Vector3 = p[key][0]
+		var q: Vector3 = p[key][1]
+		m[key] = [Vector3(r.x, -r.y, -r.z), Vector3(-q.x, q.y, q.z)]
+	return m
 
 
 ## キー列の field 番目（1：rot、2：pos）を時刻 x でなめらかにつなぐ（Catmull-Rom）。
@@ -428,8 +545,14 @@ func _hit(target: Object, blade_mid: Vector3) -> void:
 	# 斬った向き：前へ押し出しつつ、振り抜いた側へ流す
 	var cam := get_viewport().get_camera_3d().global_transform.basis
 	var forward := Vector3(-cam.z.x, 0.0, -cam.z.z).normalized()
-	var side := Vector3(cam.x.x, 0.0, cam.x.z).normalized() * -float(PATTERNS[combo].side)
-	target.call("take_hit", forward + side * 0.5, power, Vector3(at.x, blade_mid.y, at.z))
+	var side := Vector3(cam.x.x, 0.0, cam.x.z).normalized() * -float(_pattern.side)
+	var dir := forward + side * 0.5
+	if _analog:
+		# 威力 = 基本威力 × (1 + 速度 / 最高速度)。アナログ斬りは弾きの強さで基本威力が変わる
+		power *= lerpf(Tuning.slash_power_min, Tuning.slash_power_max, _slash_strength)
+		# 弾いた向きへ流す。上下の成分はダミーの潰れ方に使う
+		dir = forward + (cam.x * _slash_dir.x + cam.y * _slash_dir.y) * 0.7
+	target.call("take_hit", dir, power, Vector3(at.x, blade_mid.y, at.z))
 	_squash_vel -= Tuning.weapon_squash * power * sqrt(SQUASH_STIFFNESS)
 	HitFeel.on_hit(power, _player)
 
@@ -475,7 +598,9 @@ func _apply_pose() -> void:
 	var up := side.cross(_forearm).normalized()
 	var bb := Basis(up, deg_to_rad(_bend.x)) * Basis(side, deg_to_rad(_bend.y))
 	var bend := Transform3D(bb, _wrist - bb * _wrist)
-	swing.transform = arm * twist * bend * Transform3D(Basis.from_scale(Vector3(sxy, sxy, sz)), Vector3.ZERO)
+	# アナログ斬りは振りの面ごと視線の軸(Z)まわりに傾ける。軸は肘を通るので肘の位置は変わらない
+	var roll := Transform3D(Basis(Vector3.BACK, _roll), Vector3.ZERO)
+	swing.transform = roll * arm * twist * bend * Transform3D(Basis.from_scale(Vector3(sxy, sxy, sz)), Vector3.ZERO)
 	position = _base_position + Vector3(0.0, -_retract * 0.2 + _land, _retract) + _bob()
 
 

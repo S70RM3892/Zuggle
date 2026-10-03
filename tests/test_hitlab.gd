@@ -2,7 +2,7 @@ extends Node
 ## M3のヒットラボを自動で確かめる。実行：
 ##   godot --headless --path . res://tests/test_hitlab.tscn
 ## 失敗があれば終了コード1で終わる。
-## ダミーは(-5, 0, 4)。プレイヤーは回転0で前(-Z)を向く。
+## ダミーは(-5, 0, 4)、当たり判定は幅1.7・高さ1.8・奥行き1.2の箱。プレイヤーは回転0で前(-Z)を向く。
 
 var DT := 1.0 / Engine.physics_ticks_per_second
 
@@ -190,7 +190,7 @@ func _test_no_wallrun_on_dummy() -> void:
 	_release_all()
 	_player.respawn()
 	await _frames(30)
-	_player.global_position = _dummy.global_position + Vector3(0.8, 1.2, 2.0)
+	_player.global_position = _dummy.global_position + Vector3(1.25, 1.2, 2.0) # 箱の側面(x=0.85)の横
 	_player.velocity = Vector3.ZERO
 	await _frames(1)
 	_player.velocity = Vector3(0, 0, -8)

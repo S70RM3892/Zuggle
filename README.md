@@ -4,7 +4,32 @@
 
 ![夕方の屋上のパルクール場と、ナイフの3連の型](docs/preview.jpg)
 
-## いまの到達点：M3 ヒットラボ
+## いまの到達点：M4 アナログ斬り
+
+### M4 アナログ斬り
+
+- **斬撃モード**：RT（キーボード・マウスでは右クリックかShift）を押している間、右スティックとマウスは視点ではなく斬撃に使う。画面中央に円とスティックの位置が出る
+- **弾く**と斬る：スティックを中心付近（0.3未満）から外周（0.85以上）まで、受付時間（0.15秒）のうちに倒すと1回斬る。ゆっくり倒しただけでは出ない。1回弾いたら、中心へ戻すまで次は出ない（倒したままRTを押しても斬らない）
+- **弾いた向きが斬る向き**：弾き始めから弾き終わりへの向き。通常攻撃の振りを視線の軸まわりに傾けて、その向きに振る。右へ斬るときは左から右の振りを使い、手首が裏返らないよう傾きは±90度に収める
+- **弾く速さが強さ**：速さ ÷ 25（/秒）で強さ0〜1。強さで基本威力が0.8〜1.4、判定時間が0.14〜0.06秒になる（強いほど速く振り抜く）
+- 威力 = 基本威力 × (1 + 現在の速度 / 最高速度)。最高速度で走りながら最速で弾くと2.8
+- 斬った向きにダミーが流れる。振り下ろすほど強く潰れる
+- マウスは仮想スティック：右クリックを押しながら素早く動かす（120pxで端まで、離すと中心へ戻る）
+- 通常攻撃の途中で弾いても先行入力で出る
+- 調整パネルに「アナログ斬り」の7項目を追加
+
+### ダミー：訓練ロボット（Meshy製）
+
+- 画面の顔と2本の柱の腕を持つ訓練ロボット。元のGLB（48万三角形・20.6MB）を `tools/dummy/shrink_glb.py` で4万三角形・テクスチャ1024pxの2.0MBに軽くした（形の誤差は大きさの0.16%）
+- 高さ1.8mに合わせて置く。当たり判定は幅1.7・高さ1.8・奥行き1.2mの箱
+- 当たると素材の上に半透明の白を重ねて光らせる（モデルを替えても光る）
+
+軽くし直すとき：
+
+```sh
+pip install numpy pillow meshoptimizer
+python3 tools/dummy/shrink_glb.py 元.glb models/dummy.glb 40000 1024   # 三角形の数、テクスチャの辺
+```
 
 ### 見た目：夕方のビルの屋上（0.3.4-m3）
 
@@ -70,7 +95,7 @@ godot --headless --path . res://tools/rig/build_hand.tscn # → models/hand_rigg
 | `grip_back` | 0.09 m | 握る位置から輪の端まで |
 | `hit_length` | 1.0 m | 判定の箱の長さ（剣のときは1.4m） |
 
-クレジット：「Neon Talon」「Neon Cybernetic Hand」 made with Meshy（CC BY 4.0）。空と床・壁の素材は Poly Haven（CC0）
+クレジット：「Neon Talon」「Neon Cybernetic Hand」と訓練ロボット（ダミー） made with Meshy（CC BY 4.0）。空と床・壁の素材は Poly Haven（CC0）
 
 ### Meshyの武器に差し替える
 
@@ -113,6 +138,8 @@ Godot 4.6でこのフォルダを開き、F5で実行する。
 | 視点 | 右スティック | マウス / 矢印キー |
 | ジャンプ / 壁ジャンプ | A | Space |
 | 通常攻撃 | X | 左クリック / J |
+| 斬撃モード（押している間） | RT | 右クリック / Shift |
+| アナログ斬り | 斬撃モードで右スティックを弾く | 斬撃モードでマウスを素早く動かす |
 | ナイフ眺め | Y | F |
 | 調整パネルの開閉 | Back（View） | F1 |
 | マウスを解放 / 再捕捉 | ― | Esc / クリック |
@@ -124,8 +151,8 @@ Godot 4.6でこのフォルダを開き、F5で実行する。
 ## テスト
 
 ```sh
-tools/dev.sh check          # Godotがなければ入れる → 全スクリプトのlint → 3つのテストを並列（30秒台）
-tools/dev.sh test hitlab    # 1つだけ回す（movement / wallrun / hitlab）
+tools/dev.sh check          # Godotがなければ入れる → 全スクリプトのlint → 4つのテストを並列（30秒台）
+tools/dev.sh test hitlab    # 1つだけ回す（movement / wallrun / hitlab / slash）
 tools/dev.sh shot views     # 実際に描画して build/shots/ に撮る（views / swing / look / grip / idle / compass）
 tools/dev.sh bump 0.3.4-m3  # version/code を1つ上げ、version/name を変える
 ```
@@ -138,11 +165,15 @@ Claude Codeでは `/check` で、落ちたテストを直して全部通るま�
 
 ```sh
 godot --headless --path . res://tests/test_movement.tscn
+godot --headless --path . res://tests/test_wallrun.tscn
+godot --headless --path . res://tests/test_hitlab.tscn
+godot --headless --path . res://tests/test_slash.tscn
 ```
 
 `test_movement` は走り・ジャンプ・先行入力・コヨーテタイム・空中の勢い・小ジャンプ、
 `test_wallrun` は壁走りの開始・速度維持・弱い重力・上限時間・壁の端での抜け・正面衝突と低速では入らないこと・スティックで離れること・練習コースの踏破・方向転換・壁ジャンプ（向き・スティックでの向き・向かいの壁への乗り継ぎ・入る前の押しでは跳ばないこと・壁のコヨーテタイム）、
 `test_hitlab` は通常攻撃が当たること・ナイフ回し（2回転して元に戻る・攻撃で止まる）・手の骨と重み・1振り1回・ヒットストップの長さ・画面揺れの減衰・ダミーの吹き飛びと戻り・空振り・速度による威力・攻撃の先行入力・壁の前で武器を引っ込めること・ダミーで壁走りしないこと・3連の型が進んで戻ること・輪が人差し指にかかり刃が小指の側から前へ出ることを確かめる。
+`test_slash` は斬撃モードで視点が止まること・弾くと斬って当たること・ゆっくり倒しても斬らないこと・弾いた向き（水平・振り下ろし・斬り上げ）・速い弾きほど強いこと・中心へ戻すまで次が出ないこと・走る勢いも威力になること・マウスでの弾き・通常攻撃中の先行入力を確かめる。
 失敗があると終了コード1で終わる。
 
 ## APKの書き出し
@@ -189,8 +220,12 @@ tools/build_apk.sh   # build/zuggle-<version>.apk ができる
 | --- | --- |
 | `scenes/main.tscn` | 部屋（段差・隙間・壁走り用の長い壁と練習コース）、プレイヤー、手と武器、ダミー、HUD |
 | `scripts/player.gd` | 一人称プレイヤーの移動・壁走りとカメラ（画面揺れを含む） |
-| `scripts/weapon.gd` | 手と武器。通常攻撃の振り・当たり判定・伸び縮み・壁へのめり込み防止・Meshyモデルの読み込み |
+| `scripts/weapon.gd` | 手と武器。通常攻撃とアナログ斬りの振り・当たり判定・伸び縮み・壁へのめり込み防止・Meshyモデルの読み込み |
 | `scripts/dummy.gd` | ダミー。ばねで吹き飛び・よろけ・伸び縮みして戻る |
+| `scripts/flick_detector.gd` | 右スティックの弾きを見つける（向きと速さ） |
+| `scripts/slash_hud.gd` | 斬撃モードの円・スティックの位置・斬った向きの線 |
+| `models/dummy.glb` | ダミーの見た目（Meshy製の訓練ロボットを軽くしたもの） |
+| `tools/dummy/shrink_glb.py` | GLBのポリゴンとテクスチャを減らす |
 | `scripts/hit_feel.gd` | 自動読み込みの `HitFeel`。威力の計算・ヒットストップ・振動・効果音 |
 | `models/` | Meshyで作った `weapon.glb` を置く場所 |
 | `tools/build_apk.sh` | APKの書き出し（署名鍵の有無で署名を切り替える） |
