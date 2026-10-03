@@ -32,6 +32,9 @@ func _run() -> void:
 	await _test_inspect()
 	await _test_attack_cancels_inspect()
 	await _test_hand_rig()
+	await _test_karambit_grip()
+	await _test_slash_trail()
+	await _test_hand_sway()
 	print("\n%s" % ("ALL PASSED" if _failures == 0 else "%d FAILED" % _failures))
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -50,7 +53,7 @@ func _frames(n: int) -> void:
 
 
 func _release_all() -> void:
-	for action in ["move_forward", "move_back", "move_left", "move_right", "jump", "attack", "inspect"]:
+	for action in ["move_forward", "move_back", "move_left", "move_right", "jump", "attack", "inspect", "look_right"]:
 		Input.action_release(action)
 
 
@@ -253,3 +256,69 @@ func _test_hand_rig() -> void:
 	var idx := skel.find_bone("middle_1")
 	var gripped := skel.get_bone_pose_rotation(idx).angle_to(skel.get_bone_rest(idx).basis.get_rotation_quaternion())
 	_check(gripped > deg_to_rad(60.0), "構えでは指を握っている (%.0f 度)" % rad_to_deg(gripped))
+
+
+## カランビットの標準の握り：人差し指が輪に通り、刃は小指側から下へ出て前へ反る
+func _test_karambit_grip() -> void:
+	print("カランビットの握り")
+	await _stand(6.0)
+	var skel: Skeleton3D = _weapon.find_children("*", "Skeleton3D", true, false)[0]
+	var to_swing := _weapon.swing.global_transform.affine_inverse()
+	var a := to_swing * skel.global_transform * skel.get_bone_global_pose(skel.find_bone("index_1")).origin
+	var b := to_swing * skel.global_transform * skel.get_bone_global_pose(skel.find_bone("index_2")).origin
+	var grip := to_swing * _weapon.grip.global_transform
+	var ring := grip * _weapon.ring_center
+	var t := clampf((ring - a).dot(b - a) / (b - a).length_squared(), 0.0, 1.0)
+	var off := ring.distance_to(a + (b - a) * t)
+	_check(off < 0.004, "輪の中心が人差し指の付け根の骨の上にある（ずれ %.1f mm）" % (off * 1000.0))
+	_check(t > 0.4 and t < 0.8, "輪は人差し指の根元寄り（付け根から %.0f%%）" % (t * 100.0))
+	var tilt := rad_to_deg(grip.basis.x.normalized().angle_to((b - a).normalized()))
+	tilt = minf(tilt, 180.0 - tilt)
+	_check(tilt < 15.0, "輪の穴の軸が人差し指の向きにそろう（%.0f 度）" % tilt)
+	var tip := grip * _weapon._blade_tip
+	var pinky := to_swing * skel.global_transform * skel.get_bone_global_pose(skel.find_bone("pinky_1")).origin
+	_check(tip.y < pinky.y - 0.05, "刃先は小指より下 (%.2f m)" % (tip.y - pinky.y))
+	_check(tip.z < ring.z - 0.03, "刃は前へ反る（輪より %.2f m 前）" % (ring.z - tip.z))
+
+
+func _test_slash_trail() -> void:
+	print("斬撃の軌跡")
+	await _stand(6.0)
+	Input.action_press("attack")
+	await _frames(2)
+	Input.action_release("attack")
+	var most := 0
+	while _weapon.is_attacking():
+		await get_tree().physics_frame
+		most = maxi(most, _weapon.trail_point_count())
+	_check(most >= 6, "振りの判定中に刃の跡が残る (%d 点)" % most)
+	await _frames(int(Weapon.TRAIL_LIFE / DT) + 2)
+	_check(_weapon.trail_point_count() == 0, "すぐ消える")
+	Tuning.slash_trail = 0.0
+	Input.action_press("attack")
+	await _frames(2)
+	Input.action_release("attack")
+	most = 0
+	while _weapon.is_attacking():
+		await get_tree().physics_frame
+		most = maxi(most, _weapon.trail_point_count())
+	_check(most == 0, "0でオフ")
+	Tuning.reset_all()
+
+
+func _test_hand_sway() -> void:
+	print("視点を回したときの手の遅れ")
+	await _stand(6.0)
+	Input.action_press("look_right")
+	await _frames(int(0.2 / DT))
+	var swayed := _weapon.sway_amount()
+	Input.action_release("look_right")
+	_check(swayed > deg_to_rad(1.0) and swayed <= deg_to_rad(Weapon.SWAY_MAX) + 0.001, "回している間は手が遅れる (%.1f 度)" % rad_to_deg(swayed))
+	await _frames(int(0.5 / DT))
+	_check(_weapon.sway_amount() < deg_to_rad(0.1), "止めると戻る")
+	Tuning.hand_sway = 0.0
+	Input.action_press("look_right")
+	await _frames(int(0.2 / DT))
+	Input.action_release("look_right")
+	_check(_weapon.sway_amount() < 0.0001, "0でオフ")
+	Tuning.reset_all()

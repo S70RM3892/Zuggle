@@ -30,6 +30,19 @@ const SPECS := [
 	["wallrun_turn_accel", "壁走りの折り返しの速さ (m/s²)", 5.0, 200.0, 1.0],
 	["wall_jump_push", "壁ジャンプの離れる速さ (m/s)", 0.0, 15.0, 0.1],
 	["wall_jump_up", "壁ジャンプの上向き速度 (m/s)", 0.0, 15.0, 0.1],
+	["mantle_max_height", "よじ登れる段差の高さ (m, 足から)", 0.5, 3.0, 0.05],
+	["mantle_time", "よじ登りの時間 (秒)", 0.1, 1.0, 0.01],
+	["mantle_exit_speed", "よじ登った直後の速さ (m/s)", 0.0, 10.0, 0.1],
+	["superglide_speed", "スーパーグライドの速さ (m/s)", 5.0, 20.0, 0.1],
+	["superglide_up", "スーパーグライドの上向き速度 (m/s)", 0.0, 8.0, 0.1],
+	["superglide_gap", "スーパーグライド ジャンプとしゃがみの間 (秒)", 0.0, 0.2, 0.005],
+	["superglide_grace", "スーパーグライド 登り切った後の受付 (秒)", 0.0, 0.3, 0.01],
+	["slide_min_speed", "スライディングに入る最低速度 (m/s)", 0.0, 15.0, 0.1],
+	["slide_end_speed", "スライディングが終わる速度 (m/s)", 0.0, 10.0, 0.1],
+	["slide_friction", "スライディングの減速 (m/s²)", 0.0, 30.0, 0.5],
+	["slide_steer", "スライディング中の曲がりやすさ", 0.0, 10.0, 0.1],
+	["slide_camera_drop", "スライディング中に下げる目の高さ (m)", 0.0, 1.0, 0.05],
+	["speed_fov", "最高速度を超えた分の視野角の広がり (度, 0でオフ)", 0.0, 20.0, 0.5],
 	["attack_buffer", "攻撃の先行入力 (秒)", 0.0, 0.3, 0.01],
 	["attack_windup", "攻撃の振りかぶり (秒)", 0.0, 0.3, 0.01],
 	["attack_active", "攻撃の判定時間 (秒)", 0.02, 0.3, 0.01],
@@ -48,6 +61,9 @@ const SPECS := [
 	["dummy_damping", "ダミーの戻りの減衰", 0.0, 40.0, 0.5],
 	["dummy_squash", "ダミーの伸び縮み", 0.0, 1.0, 0.01],
 	["weapon_squash", "手・武器の伸び縮み", 0.0, 0.5, 0.01],
+	["slash_trail", "斬撃の軌跡の明るさ (0でオフ)", 0.0, 1.5, 0.05],
+	["hand_sway", "視点を回したときの手の遅れ (0でオフ)", 0.0, 3.0, 0.1],
+	["superglide_hint", "スーパーグライドの受付中に照準を緑にする (0でオフ)", 0.0, 1.0, 1.0],
 	["sfx_pitch_spread", "効果音のピッチのずれ (±)", 0.0, 0.3, 0.01],
 ]
 
@@ -77,6 +93,19 @@ var wallrun_tilt := 6.0 # 一人称では酔いに直結するので控えめ
 var wallrun_turn_accel := 40.0 # 8 m/sなら約0.4秒で折り返す
 var wall_jump_push := 5.0
 var wall_jump_up := 6.0
+var mantle_max_height := 2.0 # 目の高さ(1.65m)＋腕の届く分。ジャンプで届かない1.5mや2mの段にも登れる
+var mantle_time := 0.4
+var mantle_exit_speed := 4.0 # 登り切ると勢いが落ちる。スーパーグライドはこれを取り返す技
+var superglide_speed := 10.9 # Apexは走り7.59 m/sに対して10.3 m/s（約1.36倍）。最高速度8 m/sの1.36倍
+var superglide_up := 3.5 # 低く速く飛ぶ
+var superglide_gap := 0.05 # Apexは2フレーム以内。パッドの指の転がしで出せる幅にする
+var superglide_grace := 0.1
+var slide_min_speed := 6.0
+var slide_end_speed := 4.0
+var slide_friction := 5.0
+var slide_steer := 2.0
+var slide_camera_drop := 0.5
+var speed_fov := 6.0 # 一人称では酔いに直結するので控えめ
 var attack_buffer := 0.12
 var attack_windup := 0.05
 var attack_active := 0.10
@@ -95,6 +124,9 @@ var dummy_stiffness := 80.0
 var dummy_damping := 9.0 # 減衰比0.5前後。少し行き過ぎてから戻る
 var dummy_squash := 0.25
 var weapon_squash := 0.15
+var slash_trail := 1.0
+var hand_sway := 1.0
+var superglide_hint := 1.0 # 練習用。受付の長さを体で覚えたら0にする
 var sfx_pitch_spread := 0.08
 
 var _defaults := {}
