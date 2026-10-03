@@ -20,9 +20,13 @@ const CURL_SPIN := {
 }
 const INSPECT_TIME := 1.0
 const SPIN_TURNS := 2.0
-const POSE_INSPECT := Vector3(8.0, 12.0, 30.0) # 回す間は少し持ち上げ、ひねって見せる
+const INSPECT_ROT := Vector3(10.0, 14.0, 34.0) # 回す間は少し持ち上げ、ひねって見せる
+const INSPECT_POS := Vector3(-0.03, 0.04, -0.03)
 
 const MODEL_PATH := "res://models/weapon.glb"
+const WEAPON_GLOW := preload("res://models/weapon_emission.png")
+const HAND_GLOW := preload("res://models/hand_emission.png")
+const VIEW_LAYER := 2 # 手と武器だけの描画の層。手元用の補助光（ViewLight）はこの層だけを照らす
 const HURTBOX_LAYER := 2 # ダミーなど、斬られる側の当たり判定の層
 const HIT_THICKNESS := 0.35
 const RETRACT_REACH := 1.0 # 目の前の壁がこれより近いと武器を引っ込める (m)
@@ -30,12 +34,53 @@ const RETRACT_MAX := 0.45
 const SQUASH_STIFFNESS := 300.0
 const SQUASH_DAMPING := 18.0
 
-# 振りの姿勢（度）：x=刃先の上下、y=刃先の左右（正で左）、z=ひねり
-# 肘（拳の後ろ ELBOW の位置）を中心に回すので、前腕は肘の方を向いたまま拳が弧を描く
-const POSE_IDLE := Vector3(15.0, 10.0, 0.0)
-const POSE_WINDUP := Vector3(5.0, -60.0, -80.0) # 右から左へ振るときの構え。左から振るときは左右を反転
-const POSE_FOLLOW := Vector3(-5.0, 60.0, -80.0)
+# 姿勢：rot＝肘（拳の後ろ ELBOW）を中心にした回転（度。x=刃先の上下、y=刃先の左右（正で左）、z=ひねり）、
+# pos＝拳の位置のずれ (m)。肘を中心に回すので、前腕は肘の方を向いたまま拳が弧を描く
 const ELBOW := Vector3(0.0, 0.0, 0.35)
+const IDLE_ROT := Vector3(15.0, 10.0, 0.0)
+
+# 3連の型。振りかぶり → 中間（ここを通る弧）→ 振り終わり → 行き過ぎ の順に通る。
+# side：斬った向き（1で右から左、-1で左から右、0で正面）。ダミーを流す向きに使う
+const PATTERNS := [
+	{ # 1. 袈裟斬り：右上から左下へ
+		"windup": [Vector3(14.0, -28.0, -62.0), Vector3(0.02, 0.03, 0.05)],
+		"mid": [Vector3(4.0, 6.0, -80.0), Vector3(-0.02, 0.0, -0.12)],
+		"finish": [Vector3(-12.0, 40.0, -92.0), Vector3(-0.03, -0.02, -0.03)],
+		"follow": [Vector3(-16.0, 47.0, -96.0), Vector3(-0.04, -0.03, -0.01)],
+		"side": 1.0,
+	},
+	{ # 2. 逆袈裟：左下から右上へ
+		"windup": [Vector3(-6.0, 30.0, 70.0), Vector3(-0.02, 0.0, 0.04)],
+		"mid": [Vector3(4.0, 4.0, 84.0), Vector3(-0.01, 0.0, -0.06)],
+		"finish": [Vector3(18.0, -30.0, 94.0), Vector3(0.03, 0.03, -0.03)],
+		"follow": [Vector3(22.0, -36.0, 98.0), Vector3(0.04, 0.04, -0.01)],
+		"side": -1.0,
+	},
+	{ # 3. 突き上げ：下から前へ突き出し、刃を引っ掛けて上へ抜く
+		"windup": [Vector3(-38.0, 8.0, 8.0), Vector3(0.0, -0.07, 0.07)],
+		"mid": [Vector3(0.0, 4.0, -6.0), Vector3(-0.02, -0.01, -0.1)],
+		"finish": [Vector3(40.0, 0.0, -24.0), Vector3(0.0, 0.05, -0.05)],
+		"follow": [Vector3(46.0, 0.0, -28.0), Vector3(0.0, 0.07, -0.03)],
+		"side": 0.0,
+	},
+]
+const COMBO_RESET := 0.5 # 振り終わってからこれだけ空くと1の型に戻る (秒)
+const FOLLOW_PART := 0.35 # 戻りのうち、行き過ぎに使う割合
+
+# 構えの揺れ
+const SWAY_LOOK := 2.0 # 視点の回転の速さ1ラジアン/秒あたりの遅れ (度)
+const SWAY_MAX := 6.0
+const SWAY_STIFFNESS := 120.0
+const SWAY_DAMPING := 14.0
+const BOB_FREQ := 1.5 # 1mあたりの手の揺れの位相（ラジアン）
+const BOB_AMOUNT := Vector2(0.012, 0.008)
+const LAND_KICK := 0.012 # 着地の速さ1m/sあたりの沈み込み (m/s)
+
+# 斬撃の残光：Swing の前(-Z)に沿った帯を、振っている間だけ残す
+const TRAIL_NEAR := 0.6
+const TRAIL_FAR := 0.9
+const TRAIL_LIFE := 0.08 # 秒
+const TRAIL_COLOR := Color(0.55, 0.9, 1.0)
 
 ## Meshyのモデルを読み込んだとき、長さと向きを自動で合わせる。Gripの位置と向きは手で微調整する
 @export var auto_fit := true
@@ -55,9 +100,27 @@ var using_model := false
 
 var _t := 0.0
 var _buffer := 0.0
-var _sign := 1.0 # 1：右から左へ、-1：左から右へ。1振りごとに入れ替える
-var _from := POSE_IDLE
-var _pose := POSE_IDLE
+var combo := 0 # 今の振りの型（PATTERNS の番号）
+var _since_swing := 99.0
+var _from_rot := IDLE_ROT
+var _from_pos := Vector3.ZERO
+var _rot := IDLE_ROT # 今の姿勢
+var _pos := Vector3.ZERO
+var _settle_rot := Vector3.ZERO # 構えに戻るときの、ばねで揺れる残り
+var _settle_rot_vel := Vector3.ZERO
+var _settle_pos := Vector3.ZERO
+var _settle_pos_vel := Vector3.ZERO
+var _sway := Vector2.ZERO # 視点の回転に遅れる量（度）
+var _sway_vel := Vector2.ZERO
+var _last_cam_basis := Basis.IDENTITY
+var _bob_phase := 0.0
+var _land := 0.0
+var _land_vel := 0.0
+var _was_on_floor := true
+var _last_fall_speed := 0.0
+var _trail: MeshInstance3D
+var _trail_mesh: ImmediateMesh
+var _trail_points: Array = [] # [根元, 先, 経過秒]
 var _hit_ids := {}
 var _retract := 0.0
 var _squash := 0.0
@@ -81,9 +144,14 @@ func _ready() -> void:
 	_spin_pivot = Vector3(0.0, 0.0, grip_back - 0.02)
 	if ResourceLoader.exists(MODEL_PATH):
 		_use_model(load(MODEL_PATH))
+		_add_glow(grip, WEAPON_GLOW, 4.0)
+	_add_glow($Swing/HandModel, HAND_GLOW, 2.5)
+	for mi in swing.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).layers = 1 | VIEW_LAYER
 	var skels := find_children("*", "Skeleton3D", true, false)
 	if not skels.is_empty():
 		_skeleton = skels[0]
+	_make_trail()
 
 
 func _physics_process(delta: float) -> void:
@@ -96,13 +164,18 @@ func _physics_process(delta: float) -> void:
 		_start_swing() # ナイフ回しの途中でも攻撃を優先する
 	elif state == State.IDLE and _player and _player.input_enabled and Input.is_action_just_pressed("inspect"):
 		_start_inspect()
+	if not is_attacking():
+		_since_swing += delta # 振り終わってからの時間
 	_advance(delta)
 	if state == State.ACTIVE:
 		_check_hits()
+	_update_settle(delta)
+	_update_sway(delta)
 	_update_squash(delta)
 	_update_retract(delta)
 	_apply_pose()
 	_apply_hand()
+	_update_trail(delta)
 
 
 func is_attacking() -> bool:
@@ -122,16 +195,18 @@ func hitbox_transform() -> Transform3D:
 ## ナイフ回し：輪に通した人差し指を軸に、ナイフを2回転させて握り直す。
 func _start_inspect() -> void:
 	inspect_count += 1
-	_from = _pose
+	_capture_from()
 	_t = 0.0
 	state = State.INSPECT
 
 
 func _start_swing() -> void:
 	swing_count += 1
-	_sign = -_sign if swing_count > 1 else 1.0
+	combo = (combo + 1) % PATTERNS.size() if _since_swing < COMBO_RESET and swing_count > 1 else 0
+	_since_swing = 0.0
 	_hit_ids.clear()
-	_from = _pose
+	_capture_from()
+	_trail_points.clear()
 	_t = 0.0
 	_spin = 0.0 # 回している途中なら握り直してから振る
 	_open = 0.0
@@ -140,39 +215,116 @@ func _start_swing() -> void:
 
 func _advance(delta: float) -> void:
 	if state == State.IDLE:
-		_pose = POSE_IDLE
+		_rot = IDLE_ROT
+		_pos = Vector3.ZERO
 		return
 	_t += delta
-	var windup := _mirror(POSE_WINDUP)
-	var follow := _mirror(POSE_FOLLOW)
+	var p: Dictionary = PATTERNS[combo]
 	match state:
 		State.WINDUP:
-			var x := _ratio(Tuning.attack_windup)
-			_pose = _from.lerp(windup, _ease_out(x))
-			if x >= 1.0:
+			var x := _ease_out(_ratio(Tuning.attack_windup))
+			_set_pose(_from_rot.lerp(p.windup[0], x), _from_pos.lerp(p.windup[1], x))
+			if _t >= Tuning.attack_windup:
 				_next(State.ACTIVE)
 				HitFeel.play_swing()
 		State.ACTIVE:
-			# 判定の間は一定の速さで振り抜く
-			_pose = windup.lerp(follow, _ratio(Tuning.attack_active))
+			# 判定の間は、中間を通る弧に沿って振り抜く。入りで加速し、終わりで少し緩める
+			var x := _snap(_ratio(Tuning.attack_active))
+			_set_pose(_arc(p.windup[0], p.mid[0], p.finish[0], x), _arc(p.windup[1], p.mid[1], p.finish[1], x))
 			if _t >= Tuning.attack_active:
 				_next(State.RECOVERY)
 		State.RECOVERY:
+			# 行き過ぎてから構えに戻る。最後はばねで落ち着かせる（_update_settle）
 			var x := _ratio(Tuning.attack_recovery)
-			_pose = follow.lerp(POSE_IDLE, smoothstep(0.0, 1.0, x))
+			if x < FOLLOW_PART:
+				var k := _ease_out(x / FOLLOW_PART)
+				_set_pose(Vector3(p.finish[0]).lerp(p.follow[0], k), Vector3(p.finish[1]).lerp(p.follow[1], k))
+			else:
+				var k := smoothstep(0.0, 1.0, (x - FOLLOW_PART) / (1.0 - FOLLOW_PART))
+				_set_pose(Vector3(p.follow[0]).lerp(IDLE_ROT, k), Vector3(p.follow[1]).lerp(Vector3.ZERO, k))
 			if x >= 1.0:
 				_next(State.IDLE)
+				_kick_settle(p)
 		State.INSPECT:
 			var x := _ratio(INSPECT_TIME)
 			# 指を開く(0〜0.15) → 回す(0.1〜0.8) → 握り直す(0.75〜1.0)
 			_open = smoothstep(0.0, 0.15, x) * (1.0 - smoothstep(0.75, 1.0, x))
 			_spin = TAU * SPIN_TURNS * smoothstep(0.1, 0.8, x)
 			var lift := sin(PI * x)
-			_pose = _from.lerp(POSE_IDLE, minf(1.0, x * 4.0)).lerp(POSE_INSPECT, lift)
+			var back := minf(1.0, x * 4.0)
+			_set_pose(_from_rot.lerp(IDLE_ROT, back).lerp(INSPECT_ROT, lift), _from_pos.lerp(Vector3.ZERO, back).lerp(INSPECT_POS, lift))
 			if x >= 1.0:
 				_spin = 0.0
 				_open = 0.0
 				_next(State.IDLE)
+
+
+func _set_pose(rot: Vector3, pos: Vector3) -> void:
+	_rot = rot
+	_pos = pos
+
+
+## 今見えている姿勢（ばねの残りも含む）から次の動きを始める。
+func _capture_from() -> void:
+	_from_rot = _rot + _settle_rot
+	_from_pos = _pos + _settle_pos
+	_settle_rot = Vector3.ZERO
+	_settle_rot_vel = Vector3.ZERO
+	_settle_pos = Vector3.ZERO
+	_settle_pos_vel = Vector3.ZERO
+
+
+## 構えに戻った瞬間、振った向きの勢いを少し残して揺らす。
+func _kick_settle(p: Dictionary) -> void:
+	var dir: Vector3 = Vector3(p.follow[0]) - IDLE_ROT
+	_settle_rot_vel = dir.normalized() * -60.0
+	_settle_pos_vel = Vector3(p.follow[1]).normalized() * -0.15
+
+
+func _update_settle(delta: float) -> void:
+	const K := 220.0
+	const D := 16.0
+	_settle_rot_vel += (-K * _settle_rot - D * _settle_rot_vel) * delta
+	_settle_rot += _settle_rot_vel * delta
+	_settle_pos_vel += (-K * _settle_pos - D * _settle_pos_vel) * delta
+	_settle_pos += _settle_pos_vel * delta
+
+
+## 視点を回すと手が遅れてついてくる。走ると8の字に揺れ、着地で沈む。
+func _update_sway(delta: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null or delta <= 0.0:
+		return
+	var b := cam.global_transform.basis.orthonormalized()
+	var rel := _last_cam_basis.inverse() * b
+	_last_cam_basis = b
+	var e := rel.get_euler()
+	var target := Vector2(
+		clampf(-e.y / delta * SWAY_LOOK, -SWAY_MAX, SWAY_MAX),
+		clampf(-e.x / delta * SWAY_LOOK, -SWAY_MAX, SWAY_MAX))
+	if absf(e.y) > 0.5 or absf(e.x) > 0.5:
+		target = Vector2.ZERO # 生まれ直しなどで大きく飛んだときは揺らさない
+	_sway_vel += (SWAY_STIFFNESS * (target - _sway) - SWAY_DAMPING * _sway_vel) * delta
+	_sway += _sway_vel * delta
+	if _player == null:
+		return
+	var on_floor := _player.is_on_floor()
+	var speed := _player.horizontal_speed()
+	if on_floor:
+		_bob_phase += speed * BOB_FREQ * delta
+	if on_floor and not _was_on_floor:
+		_land_vel -= clampf(_last_fall_speed, 0.0, 20.0) * LAND_KICK * 20.0
+	_was_on_floor = on_floor
+	_last_fall_speed = -_player.velocity.y
+	_land_vel += (-260.0 * _land - 18.0 * _land_vel) * delta
+	_land += _land_vel * delta
+
+
+func _bob() -> Vector3:
+	if _player == null or not _player.is_on_floor():
+		return Vector3.ZERO
+	var k := clampf(_player.horizontal_speed() / maxf(Tuning.max_speed, 0.01), 0.0, 1.0)
+	return Vector3(sin(_bob_phase) * BOB_AMOUNT.x, -absf(cos(_bob_phase)) * BOB_AMOUNT.y, 0.0) * k
 
 
 func _next(s: State) -> void:
@@ -188,8 +340,16 @@ func _ease_out(x: float) -> float:
 	return 1.0 - (1.0 - x) * (1.0 - x)
 
 
-func _mirror(p: Vector3) -> Vector3:
-	return p if _sign > 0.0 else Vector3(p.x, -p.y, -p.z)
+## 入りで加速して振り抜き、終わりで少し緩める。
+func _snap(x: float) -> float:
+	return x * x * (3.0 - 2.0 * x) * 0.6 + x * x * 0.4
+
+
+## a から c へ、t=0.5 で b を通る2次曲線。
+func _arc(a: Vector3, b: Vector3, c: Vector3, t: float) -> Vector3:
+	var ctrl := b * 2.0 - (a + c) * 0.5
+	var u := 1.0 - t
+	return a * u * u + ctrl * 2.0 * u * t + c * t * t
 
 
 func _check_hits() -> void:
@@ -219,7 +379,7 @@ func _hit(target: Object, blade_mid: Vector3) -> void:
 	# 斬った向き：前へ押し出しつつ、振り抜いた側へ流す
 	var cam := get_viewport().get_camera_3d().global_transform.basis
 	var forward := Vector3(-cam.z.x, 0.0, -cam.z.z).normalized()
-	var side := Vector3(cam.x.x, 0.0, cam.x.z).normalized() * -_sign
+	var side := Vector3(cam.x.x, 0.0, cam.x.z).normalized() * -float(PATTERNS[combo].side)
 	target.call("take_hit", forward + side * 0.5, power, Vector3(at.x, blade_mid.y, at.z))
 	_squash_vel -= Tuning.weapon_squash * power * sqrt(SQUASH_STIFFNESS)
 	HitFeel.on_hit(power, _player)
@@ -250,15 +410,16 @@ func retract_amount() -> float:
 
 
 func _apply_pose() -> void:
-	var rot := Vector3(deg_to_rad(_pose.x), deg_to_rad(_pose.y), deg_to_rad(_pose.z))
+	var r := _rot + _settle_rot + Vector3(_sway.y, _sway.x, -_sway.x * 0.6)
+	var rot := Vector3(deg_to_rad(r.x), deg_to_rad(r.y), deg_to_rad(r.z))
 	# 引っ込めるときは刃先を上へ逃がす
 	rot.x += _retract / RETRACT_MAX * deg_to_rad(40.0)
 	# 体積を保ったまま刃の向き(Z)に伸び縮みさせる
 	var sz := 1.0 + _squash
 	var sxy := 1.0 / sqrt(sz)
 	var b := Basis.from_euler(rot)
-	swing.transform = Transform3D(b * Basis.from_scale(Vector3(sxy, sxy, sz)), ELBOW - b * ELBOW)
-	position = _base_position + Vector3(0.0, -_retract * 0.2, _retract)
+	swing.transform = Transform3D(b * Basis.from_scale(Vector3(sxy, sxy, sz)), ELBOW - b * ELBOW + _pos + _settle_pos)
+	position = _base_position + Vector3(0.0, -_retract * 0.2 + _land, _retract) + _bob()
 
 
 ## 指の曲げとナイフの回転を反映する。
@@ -277,6 +438,70 @@ func _apply_hand() -> void:
 			var angle := deg_to_rad(lerpf(closed[k], opened[k], _open))
 			var rest := _skeleton.get_bone_rest(idx).basis.get_rotation_quaternion()
 			_skeleton.set_bone_pose_rotation(idx, rest * Quaternion(Vector3.RIGHT, angle))
+
+
+## 色テクスチャから抜き出した水色・マゼンタの線（*_emission.png）を光らせる。
+func _add_glow(root: Node, tex: Texture2D, energy: float) -> void:
+	for mi in root.find_children("*", "MeshInstance3D", true, false):
+		var mesh_i := mi as MeshInstance3D
+		for i in mesh_i.mesh.get_surface_count():
+			var mat := mesh_i.get_active_material(i) as BaseMaterial3D
+			if mat == null:
+				continue
+			mat = mat.duplicate()
+			mat.emission_enabled = true
+			mat.emission = Color.BLACK # 既定（足し算）では「発光色＋テクスチャ」なので、テクスチャだけで光らせる
+			mat.emission_texture = tex
+			mat.emission_energy_multiplier = energy
+			mesh_i.set_surface_override_material(i, mat)
+
+
+func _make_trail() -> void:
+	_trail_mesh = ImmediateMesh.new()
+	_trail = MeshInstance3D.new()
+	_trail.name = "Trail"
+	_trail.mesh = _trail_mesh
+	_trail.top_level = true # 頂点をワールド座標で置く
+	_trail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.vertex_color_use_as_albedo = true
+	m.albedo_color = Color(TRAIL_COLOR.r * 1.6, TRAIL_COLOR.g * 1.6, TRAIL_COLOR.b * 1.6)
+	m.no_depth_test = false
+	_trail.material_override = m
+	add_child(_trail)
+
+
+## 振っている間は刃の通り道を記録し、古いものから消えていく帯として描く。
+func _update_trail(delta: float) -> void:
+	if _trail == null:
+		return
+	_trail.global_transform = Transform3D.IDENTITY
+	for p in _trail_points:
+		p[2] += delta
+	while not _trail_points.is_empty() and _trail_points[0][2] > TRAIL_LIFE:
+		_trail_points.pop_front()
+	if state == State.ACTIVE or (state == State.RECOVERY and _t < Tuning.attack_recovery * FOLLOW_PART * 0.5):
+		var g := swing.global_transform
+		_trail_points.append([g * Vector3(0, 0, -TRAIL_NEAR), g * Vector3(0, 0, -TRAIL_FAR), 0.0])
+	_trail_mesh.clear_surfaces()
+	var n := _trail_points.size()
+	if n < 2:
+		return
+	_trail_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	for i in n:
+		var p: Array = _trail_points[i]
+		var life: float = 1.0 - p[2] / TRAIL_LIFE
+		var head := float(i) / float(n - 1) # 新しい側ほど明るい
+		var a := clampf(life * (0.25 + 0.75 * head), 0.0, 1.0)
+		_trail_mesh.surface_set_color(Color(1, 1, 1, 0.0))
+		_trail_mesh.surface_add_vertex(p[0])
+		_trail_mesh.surface_set_color(Color(1, 1, 1, a * 0.6))
+		_trail_mesh.surface_add_vertex(p[1])
+	_trail_mesh.surface_end()
 
 
 func _find_player() -> Player:

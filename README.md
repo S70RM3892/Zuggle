@@ -2,7 +2,24 @@
 
 一人称3Dのパルクール斬撃アクション。Godot 4.6（GDScript）。
 
+![夕方の屋上のパルクール場と、ナイフの3連の型](docs/preview.jpg)
+
 ## いまの到達点：M3 ヒットラボ
+
+### 見た目：夕方のビルの屋上（0.3.4-m3）
+
+- 空はPoly Havenの夕景（sunset_jhbcentral）。床・壁・足場もPoly HavenのPBR素材（どれもCC0）
+- 乗れる足場の縁は橙、壁走りできる壁は水色、外周の手すりは白く光る（`scripts/arena.gd` が起動時に付ける）
+- 床に4m間隔の目地（走ると流れて速さが分かる）。外周に空調機・換気塔・給水タンク・点滅するアンテナ
+- 外周の高い壁は見えない壁（層3）にした。壁走りと武器の引っ込めの対象にはならない
+- 手とナイフは色テクスチャの水色・マゼンタの線を光らせ（`models/*_emission.png`）、手元だけを照らす補助光（ViewLight）を当てる
+
+### ナイフのモーション（0.3.4-m3）
+
+- 3連の型：①袈裟斬り（右上→左下）②逆袈裟（左下→右上）③突き上げ（前へ突いて上へ引っ掛ける）。振り終わってから0.5秒以内に押すと次の型、空くと①に戻る
+- どの型も「振りかぶり → 中間を通る弧 → 行き過ぎ → ばねで構えに戻る」。型は `scripts/weapon.gd` の `PATTERNS`
+- 振っている間は刃の通り道に水色の残光が出る（`TRAIL_*`）
+- 視点を回すと手が遅れてついてくる・走ると揺れる・着地で沈む（`SWAY_*`・`BOB_*`・`LAND_KICK`）
 
 ### M3 ヒットラボ
 
@@ -44,7 +61,7 @@ godot --headless --path . res://tools/rig/build_hand.tscn # → models/hand_rigg
 | `grip_back` | 0.09 m | 握る位置から輪の端まで |
 | `hit_length` | 1.0 m | 判定の箱の長さ（剣のときは1.4m） |
 
-クレジット：「Neon Talon」「Neon Cybernetic Hand」 made with Meshy（CC BY 4.0）
+クレジット：「Neon Talon」「Neon Cybernetic Hand」 made with Meshy（CC BY 4.0）。空と床・壁の素材は Poly Haven（CC0）
 
 ### Meshyの武器に差し替える
 
@@ -100,6 +117,7 @@ Godot 4.6でこのフォルダを開き、F5で実行する。
 ```sh
 tools/dev.sh check          # Godotがなければ入れる → 全スクリプトのlint → 3つのテストを並列（30秒台）
 tools/dev.sh test hitlab    # 1つだけ回す（movement / wallrun / hitlab）
+tools/dev.sh shot views     # 実際に描画して build/shots/ に撮る（views / swing / idle / compass）
 tools/dev.sh bump 0.3.4-m3  # version/code を1つ上げ、version/name を変える
 ```
 
@@ -115,7 +133,7 @@ godot --headless --path . res://tests/test_movement.tscn
 
 `test_movement` は走り・ジャンプ・先行入力・コヨーテタイム・空中の勢い・小ジャンプ、
 `test_wallrun` は壁走りの開始・速度維持・弱い重力・上限時間・壁の端での抜け・正面衝突と低速では入らないこと・スティックで離れること・練習コースの踏破・方向転換・壁ジャンプ（向き・スティックでの向き・向かいの壁への乗り継ぎ・入る前の押しでは跳ばないこと・壁のコヨーテタイム）、
-`test_hitlab` は通常攻撃が当たること・ナイフ回し（2回転して元に戻る・攻撃で止まる）・手の骨と重み・1振り1回・ヒットストップの長さ・画面揺れの減衰・ダミーの吹き飛びと戻り・空振り・速度による威力・攻撃の先行入力・壁の前で武器を引っ込めること・ダミーで壁走りしないことを確かめる。
+`test_hitlab` は通常攻撃が当たること・ナイフ回し（2回転して元に戻る・攻撃で止まる）・手の骨と重み・1振り1回・ヒットストップの長さ・画面揺れの減衰・ダミーの吹き飛びと戻り・空振り・速度による威力・攻撃の先行入力・壁の前で武器を引っ込めること・ダミーで壁走りしないこと・3連の型が進んで戻ることを確かめる。
 失敗があると終了コード1で終わる。
 
 ## APKの書き出し
@@ -172,6 +190,9 @@ tools/build_apk.sh   # build/zuggle-<version>.apk ができる
 | `.github/workflows/release-apk.yml` | テスト→APK書き出し→GitHubのリリース |
 | `scripts/tuning.gd` | 調整値（自動読み込みの `Tuning`）。`SPECS` に足すとスライダーも増える |
 | `scripts/debug_ui.gd` | 調整パネル |
+| `scripts/arena.gd` | パルクール場の飾り（光る縁・床の目地・外周の小物） |
+| `materials/`・`textures/env/` | 床・壁・足場の素材と空 |
+| `tools/shot/` | スクリーンショット（`tools/dev.sh shot`） |
 | `tests/` | 自動テスト |
 | `tools/dev.sh` | Godotの導入・lint・テスト・版上げをまとめたコマンド |
 | `tools/lint.tscn` | 全スクリプトを読み込んで文法・型のエラーを出す |

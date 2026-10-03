@@ -15,7 +15,7 @@ const VIEWS := [
 ]
 const COMPASS := [0.0, 90.0, 180.0, 270.0]
 const SWING_FRAMES := 12
-const SWING_STEP := 0.04
+const SWING_STEP := 1.0 / 30.0
 
 var _player: Player
 
@@ -41,18 +41,28 @@ func _run() -> void:
 			await _place(v[1], v[2], v[3])
 			await _save("view_%s" % v[0])
 		_player.set_physics_process(true)
+	if mode == "idle":
+		await _place(Vector3(-5, 0.9, 5.6), 0.0, -3.0)
+		await _save("idle_0")
+		_player.get_node("Head/Camera3D/ViewLight").visible = false
+		await _wait(0.2)
+		await _save("idle_1")
 	if mode == "compass":
 		for yaw in COMPASS:
 			await _place(Vector3(0, 0.9, 0), yaw, 8.0)
 			await _save("compass_%03d" % int(yaw))
 	if mode == "swing" or mode == "all":
-		await _place(Vector3(-5, 0.9, 6.0), 0.0, -3.0)
-		_player.input_enabled = true
-		await _sequence("attack", "swing")
-		await _wait(0.8)
-		await _sequence("attack", "swing2")
-		await _wait(0.8)
-		await _sequence("inspect", "inspect", 0.09)
+		# 描画が遅くても動きを等間隔に撮れるよう、武器の時間を手で進める
+		await _place(Vector3(-5, 0.9, 5.6), 0.0, -3.0)
+		var weapon: Weapon = _player.get_node("Head/Camera3D/Hand")
+		weapon.set_physics_process(false)
+		for k in 3:
+			weapon.call("_start_swing")
+			await _steps(weapon, "swing%d" % k, SWING_FRAMES, SWING_STEP)
+			_steps_silent(weapon, 0.25) # 振り終わってすぐ次を振り、型をつなげる
+		weapon.call("_start_inspect")
+		await _steps(weapon, "inspect", SWING_FRAMES, 0.09)
+		weapon.set_physics_process(true)
 	get_tree().quit()
 
 
@@ -66,14 +76,16 @@ func _place(pos: Vector3, yaw: float, pitch: float) -> void:
 	await _wait(0.4)
 
 
-func _sequence(action: String, name: String, step := SWING_STEP) -> void:
-	Input.action_press(action)
-	await get_tree().physics_frame
-	await get_tree().physics_frame
-	Input.action_release(action)
-	for i in SWING_FRAMES:
+func _steps(weapon: Weapon, name: String, frames: int, step: float) -> void:
+	for i in frames:
 		await _save("%s_%02d" % [name, i])
-		await _wait(step)
+		_steps_silent(weapon, step)
+
+
+func _steps_silent(weapon: Weapon, sec: float) -> void:
+	var dt := 1.0 / 120.0
+	for i in int(round(sec / dt)):
+		weapon.call("_physics_process", dt)
 
 
 func _wait(sec: float) -> void:

@@ -32,6 +32,7 @@ func _run() -> void:
 	await _test_inspect()
 	await _test_attack_cancels_inspect()
 	await _test_hand_rig()
+	await _test_combo()
 	print("\n%s" % ("ALL PASSED" if _failures == 0 else "%d FAILED" % _failures))
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -253,3 +254,21 @@ func _test_hand_rig() -> void:
 	var idx := skel.find_bone("middle_1")
 	var gripped := skel.get_bone_pose_rotation(idx).angle_to(skel.get_bone_rest(idx).basis.get_rotation_quaternion())
 	_check(gripped > deg_to_rad(60.0), "構えでは指を握っている (%.0f 度)" % rad_to_deg(gripped))
+
+
+func _test_combo() -> void:
+	print("3連の型")
+	await _stand(6.0)
+	var seen: Array[int] = []
+	for i in 4:
+		await _press("attack")
+		seen.append(_weapon.combo)
+		while _weapon.is_attacking():
+			await get_tree().physics_frame
+		await _frames(int(0.1 / DT))
+	_check(seen == [0, 1, 2, 0], "続けて振ると型が1→2→3→1と進む (%s)" % str(seen))
+	await _frames(int(0.8 / DT))
+	await _press("attack")
+	_check(_weapon.combo == 0, "間を空けると1の型に戻る (%d)" % _weapon.combo)
+	while _weapon.is_attacking():
+		await get_tree().physics_frame
