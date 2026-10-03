@@ -2,7 +2,7 @@ extends Node
 ## M3のヒットラボを自動で確かめる。実行：
 ##   godot --headless --path . res://tests/test_hitlab.tscn
 ## 失敗があれば終了コード1で終わる。
-## ダミーは(-5, 0, 4)。プレイヤーは回転0で前(-Z)を向く。
+## ダミーは(-5, 0, 4)、当たり判定は幅1.7・高さ1.8・奥行き1.2の箱。プレイヤーは回転0で前(-Z)を向く。
 
 var DT := 1.0 / Engine.physics_ticks_per_second
 
@@ -32,6 +32,8 @@ func _run() -> void:
 	await _test_inspect()
 	await _test_attack_cancels_inspect()
 	await _test_hand_rig()
+	await _test_combo()
+	await _test_grip()
 	print("\n%s" % ("ALL PASSED" if _failures == 0 else "%d FAILED" % _failures))
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -173,8 +175,8 @@ func _test_retract_near_wall() -> void:
 	print("壁へのめり込み")
 	_release_all()
 	_player.respawn()
-	# 北の壁（面はz=-30）の手前0.6m
-	_player.global_position = Vector3(0, 0.9, -29.4)
+	# 壁走り用の長い壁（南の面はz=18.5）の手前0.6m
+	_player.global_position = Vector3(0, 0.9, 19.1)
 	_player.rotation = Vector3.ZERO
 	await _frames(int(0.5 / DT))
 	_check(_weapon.retract_amount() > 0.2, "壁の前では武器を引っ込める (%.2f)" % _weapon.retract_amount())
@@ -188,7 +190,7 @@ func _test_no_wallrun_on_dummy() -> void:
 	_release_all()
 	_player.respawn()
 	await _frames(30)
-	_player.global_position = _dummy.global_position + Vector3(0.8, 1.2, 2.0)
+	_player.global_position = _dummy.global_position + Vector3(1.25, 1.2, 2.0) # 箱の側面(x=0.85)の横
 	_player.velocity = Vector3.ZERO
 	await _frames(1)
 	_player.velocity = Vector3(0, 0, -8)
@@ -206,9 +208,12 @@ func _press(action: String) -> void:
 
 
 func _knife_angle() -> float:
-	# 柄の向き(Grip の Z)が Swing の中でどれだけ回っているか
+	# 柄の向き(Grip の Z)が、ナイフ回しの軸まわりに握った向きからどれだけ回っているか
 	var z := (_weapon.swing.global_transform.affine_inverse() * _weapon.grip.global_transform).basis.z.normalized()
-	return atan2(z.z, z.y)
+	var axis := _weapon.spin_axis()
+	var e1 := _weapon.grip_rest().basis.z.normalized()
+	var e2 := axis.cross(e1)
+	return atan2(z.dot(e2), z.dot(e1))
 
 
 func _test_inspect() -> void:
@@ -220,25 +225,27 @@ func _test_inspect() -> void:
 	var turned := 0.0
 	var last := rest
 	var frames := 0
-	var steps: Array[float] = []
+	var steps: Array[float] = [] # 1フレームごとの回転（_spin の増え）
+	var last_spin := 0.0
 	while _weapon.is_inspecting() and frames < 400:
 		await get_tree().physics_frame
 		frames += 1
 		var a := _knife_angle()
-		var step := absf(wrapf(a - last, -PI, PI))
-		turned += step
+		turned += absf(wrapf(a - last, -PI, PI))
 		last = a
-		steps.append(step)
+		if _weapon._spin > 0.0:
+			steps.append(_weapon._spin - last_spin)
+		last_spin = _weapon._spin
 	var secs := frames * DT
 	_check(absf(secs - Weapon.INSPECT_TIME) < 0.05, "約%.1f秒で終わる (%.2f 秒)" % [Weapon.INSPECT_TIME, secs])
 	_check(absf(turned - TAU * Weapon.SPIN_TURNS) < 0.3, "%d回転する (%.1f 回転)" % [int(Weapon.SPIN_TURNS), turned / TAU])
 	_check(absf(wrapf(_knife_angle() - rest, -PI, PI)) < 0.01, "握り直して元の向きに戻る")
-	# 一定の速さ（または加速→減速の1山）ではなく、1回転ごとに刃先が下るとき速く、上るとき遅くなる
-	var peaks := 0
+	# 一定の速さ（または加速→減速の1山）ではなく、1回転ごとに刃先が上へ来たところで遅くなる
+	var dips := 0
 	for i in range(1, steps.size() - 1):
-		if steps[i] > steps[i - 1] + 0.001 and steps[i] >= steps[i + 1]:
-			peaks += 1
-	_check(peaks >= int(Weapon.SPIN_TURNS), "1回転ごとに速さが変わる (速さの山 %d)" % peaks)
+		if steps[i] < steps[i - 1] - 0.001 and steps[i] <= steps[i + 1]:
+			dips += 1
+	_check(dips >= int(Weapon.SPIN_TURNS), "1回転ごとに刃先が上で遅くなる (速さの谷 %d)" % dips)
 
 
 func _test_attack_cancels_inspect() -> void:
@@ -262,9 +269,38 @@ func _test_hand_rig() -> void:
 	var idx := skel.find_bone("middle_1")
 	var gripped := skel.get_bone_pose_rotation(idx).angle_to(skel.get_bone_rest(idx).basis.get_rotation_quaternion())
 	_check(gripped > deg_to_rad(60.0), "構えでは指を握っている (%.0f 度)" % rad_to_deg(gripped))
-	# 親指の先が手の前へ突き出ず、握った人差し指の上に乗っている
-	var tip := skel.get_bone_global_pose(skel.find_bone("thumb_3"))
-	var thumb_tip := tip.origin
-	var index_mid := skel.get_bone_global_pose(skel.find_bone("index_2")).origin
-	var gap := thumb_tip.distance_to(index_mid) * skel.global_basis.get_scale().x
-	_check(gap < 0.06, "親指は人差し指の上に乗る (%.3f m)" % gap)
+
+
+func _test_combo() -> void:
+	print("3連の型")
+	await _stand(6.0)
+	var seen: Array[int] = []
+	for i in 4:
+		await _press("attack")
+		seen.append(_weapon.combo)
+		while _weapon.is_attacking():
+			await get_tree().physics_frame
+		await _frames(int(0.1 / DT))
+	_check(seen == [0, 1, 2, 0], "続けて振ると型が1→2→3→1と進む (%s)" % str(seen))
+	await _frames(int(0.8 / DT))
+	await _press("attack")
+	_check(_weapon.combo == 0, "間を空けると1の型に戻る (%d)" % _weapon.combo)
+	while _weapon.is_attacking():
+		await get_tree().physics_frame
+
+
+func _test_grip() -> void:
+	print("ナイフの握り")
+	await _stand(6.0)
+	var skel: Skeleton3D = _weapon.find_children("*", "Skeleton3D", true, false)[0]
+	var to_swing := _weapon.swing.global_transform.affine_inverse() * skel.global_transform
+	var bone := func(n: String) -> Vector3: return to_swing * skel.get_bone_global_pose(skel.find_bone(n)).origin
+	var rest := _weapon.grip_rest()
+	var ring: Vector3 = rest * _weapon._spin_pivot
+	var index_mid: Vector3 = (bone.call("index_1") + bone.call("index_2")) * 0.5
+	_check(ring.distance_to(index_mid) < 0.02, "輪は人差し指の付け根の節にかかる (%.3f m)" % ring.distance_to(index_mid))
+	var tip: Vector3 = rest * Vector3(0, 0, _weapon.grip_back - _weapon.model_length)
+	var pinky: Vector3 = bone.call("pinky_1")
+	_check(tip.y < pinky.y, "刃先は小指より下へ出る")
+	var curve: Vector3 = rest.basis * _weapon._blade_dir
+	_check(curve.normalized().z < -0.7, "刃は拳の前へ曲がる (%.2f)" % curve.normalized().z)

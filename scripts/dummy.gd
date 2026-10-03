@@ -2,6 +2,7 @@ class_name Dummy
 extends StaticBody3D
 ## HPを持たない練習用ダミー。当たった位置と斬った向きに応じて吹き飛び、よろけ、元の位置に戻る。
 ## 当たり判定（StaticBody）は動かさず、見た目（Visual）だけをばねで揺らす。
+## 見た目はMeshy製の訓練ロボット（models/dummy.glb）。当たると白く光らせる（素材に重ねる半透明の白）。
 
 const HEIGHT := 1.8
 const FLASH_TIME := 0.08
@@ -15,32 +16,33 @@ var _lean_vel := Vector3.ZERO
 var _squash := 0.0 # 正で縦に伸び、負で縮む
 var _squash_vel := 0.0
 var _flash := 0.0
-var _material: StandardMaterial3D
+var _flash_material: StandardMaterial3D
 
 @onready var visual: Node3D = $Visual
 
 
 func _ready() -> void:
-	# 見た目の素材は複製して、白く光らせてもほかのダミーに移らないようにする
-	var body: MeshInstance3D = $Visual/Body
-	_material = (body.get_active_material(0) as StandardMaterial3D).duplicate()
-	_material.emission_enabled = true
-	_material.emission = Color.WHITE
-	_material.emission_energy_multiplier = 0.0
-	for mesh in visual.find_children("*", "MeshInstance3D"):
-		(mesh as MeshInstance3D).material_override = _material
+	# どんなモデルでも光らせられるよう、元の素材は触らずに白を重ねる。ダミーごとに作るのでほかに移らない
+	_flash_material = StandardMaterial3D.new()
+	_flash_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_flash_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_flash_material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	_flash_material.albedo_color = Color(1, 1, 1, 0)
+	for mesh in visual.find_children("*", "MeshInstance3D", true, false):
+		(mesh as MeshInstance3D).material_overlay = _flash_material
 
 
-## dir：斬った向き（水平）。point：当たった位置（ワールド座標）。
+## dir：斬った向き。水平の成分で吹き飛び、下向きの成分ほど強く潰れる。point：当たった位置（ワールド座標）。
 func take_hit(dir: Vector3, power: float, point: Vector3) -> void:
 	hit_count += 1
+	var down := clampf(-dir.normalized().y, 0.0, 1.0)
 	dir = Vector3(dir.x, 0.0, dir.z).normalized()
 	_offset_vel += dir * Tuning.dummy_knockback * power
 	# 高いところに当たるほど大きくよろける
 	var height := clampf((point.y - global_position.y) / HEIGHT, 0.2, 1.0)
 	_lean_vel += dir * Tuning.dummy_tilt * power * height
 	# まず潰れて、行き過ぎて伸びてから戻る
-	_squash_vel -= Tuning.dummy_squash * power * sqrt(Tuning.dummy_stiffness)
+	_squash_vel -= Tuning.dummy_squash * power * (1.0 + down) * sqrt(Tuning.dummy_stiffness)
 	_flash = FLASH_TIME
 
 
@@ -78,4 +80,4 @@ func _apply_visual() -> void:
 	var sy := 1.0 + _squash
 	var sxz := 1.0 / sqrt(sy)
 	visual.transform = Transform3D(basis * Basis.from_scale(Vector3(sxz, sy, sxz)), _offset)
-	_material.emission_energy_multiplier = 2.0 if _flash > 0.0 else 0.0
+	_flash_material.albedo_color.a = 0.4 if _flash > 0.0 else 0.0

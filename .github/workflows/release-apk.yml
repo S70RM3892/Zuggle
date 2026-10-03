@@ -57,14 +57,10 @@ jobs:
           unzip -q /tmp/templates.tpz 'templates/android_*' 'templates/version.txt' -d /tmp/tpl
           mv /tmp/tpl/templates/* "$dest/"
 
-      - name: 自動テスト
-        run: |
-          ~/godot/godot --headless --path . --import > /dev/null 2>&1 || true
-          for t in movement wallrun hitlab; do
-            echo "::group::test_$t"
-            timeout 300 ~/godot/godot --headless --path . "res://tests/test_$t.tscn"
-            echo "::endgroup::"
-          done
+      - name: lintと自動テスト
+        env:
+          GODOT: /home/runner/godot/godot
+        run: tools/dev.sh check
 
       - name: APKを書き出す
         id: build
