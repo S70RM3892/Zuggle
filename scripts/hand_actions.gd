@@ -3,7 +3,8 @@ extends Node
 ## 左手と右手のアクション。Player の子に置く。
 ## 左手（LB / Q / 右クリック）＝掴む：縁を掴んで登る（縁掴み）、縦のポールを掴んで回る（ポール回り）。
 ##   押しっぱなしにしておけば、届く縁やポールに来た瞬間に掴む。ポールは離すと手を放す。
-## 右手（RB / E / 左クリック）＝押す：低い障害物に手をついて越える（ボールト）、壁を突き放す（壁押し）。
+## 右手（RB / E / 左クリック）＝押す：低い障害物に手をついて越える（ボールト。押すのが遅いほど強い）、
+##   壁を突き放す（壁押し。スティックで向きを決められる）。
 ## 何もなければ空振り（手を伸ばして戻すだけ）。
 ## 縁掴み・ボールト・ポール回りの間は Player.take_control() で体の動きを預かる。
 ## 大原則どおり、どれも入る前の水平速度を出口へ持ち出す。
@@ -22,6 +23,8 @@ var move := Move.NONE
 ## テストと調整用。最後に出たアクションの名前（"ledge", "pole", "vault", "push", "whiff"）
 var last_left := ""
 var last_right := ""
+## 直前のボールトの押しのよさ（0：届くぎりぎりで押した〜1：ジャスト）
+var vault_quality := 0.0
 
 var _player: Player
 var _left_buffer := 0.0
@@ -41,10 +44,11 @@ var _exit := Vector3.ZERO
 var _prev_pos := Vector3.ZERO
 var _pole: Node3D
 var _pole_angle := 0.0
-var _pole_dir := 1.0
-var _pole_speed := 0.0
+var _pole_v := 0.0 # ポールを回る速さ（符号つき。正で atan2 の角度が増える向き）
+var _pole_entry_speed := 0.0
 var _pole_r := 0.0
 var _pole_vy := 0.0
+var _pole_swept := 0.0
 
 # 手の見た目用。side → {point, palm, fingers, pose, time}
 var _plants := {}
@@ -62,7 +66,10 @@ func _physics_process(delta: float) -> void:
 	if _player.is_on_floor():
 		_pushed_normal = Vector3.ZERO
 	if move != Move.NONE:
-		return # 動作中は drive() が進める
+		# 動作中は drive() が進める。動作中の押しを、終わった後の先行入力として残さない
+		_left_buffer = 0.0
+		_right_buffer = 0.0
+		return
 	var left_held := _player.input_enabled and Input.is_action_pressed("hand_left")
 	if not left_held:
 		_left_needs_release = false
@@ -78,7 +85,6 @@ func _physics_process(delta: float) -> void:
 		elif _right_just_pressed:
 			_whiff(Side.RIGHT)
 			last_right = "whiff"
-
 
 
 func _read_input(delta: float) -> void:
@@ -103,6 +109,8 @@ func is_busy() -> bool:
 func cancel() -> void:
 	move = Move.NONE
 	_plants.clear()
+	_left_buffer = 0.0
+	_right_buffer = 0.0
 
 
 ## Player が体を預けている間、毎物理フレーム呼ぶ。
@@ -203,6 +211,12 @@ func _drive_mantle() -> void:
 
 
 # ---------- 左手：ポール回り ----------
+# 円運動を押し付けず、腕を「伸びきると突っ張る紐」として扱う。
+# 掴んだ瞬間の速度を、ポールを回る向き（接線）と、ポールへ向かう・離れる向き（半径）に分け、
+# 接線の分はそのまま、半径の分は pole_redirect の割合だけ回る速さへ振り替える。
+# だから、ポールの脇をかすめて掴めば勢いよく回り、正面から突っ込めばあまり回らない。
+# 回る間は角運動量（速さ×半径）を保つ。スティックをポールへ倒すと腕を縮めて速く回り、離す向きへ倒すと伸ばして遅く回る。
+# 上下の速度も持ち込む（跳んで掴めばポールを少し上る）。
 
 func _try_pole() -> bool:
 	var best: Node3D = null
@@ -238,16 +252,23 @@ func _start_pole(pole: Node3D) -> void:
 	var r := Vector2(rel.x, rel.z)
 	if r.length() < 0.05:
 		r = Vector2(-_player.facing().x, -_player.facing().z) * 0.3
+	var radial := r.normalized()
 	_pole_angle = atan2(r.y, r.x)
-	_pole_r = r.length()
+	_pole_r = clampf(r.length(), Tuning.pole_min_radius, Tuning.pole_max_radius)
 	var h := _hvel()
 	var v := Vector2(h.x, h.z)
-	if v.length() < 0.5:
-		v = Vector2(_player.facing().x, _player.facing().z)
-	# 今の動きに沿う向きへ回る。r × v の符号で決める
-	_pole_dir = 1.0 if r.cross(v) >= 0.0 else -1.0
-	_pole_speed = maxf(h.length(), Tuning.pole_min_speed)
-	_pole_vy = minf(_player.velocity.y, 1.0)
+	var v_t := radial.cross(v) # 正なら atan2 の角度が増える向き（上から見て反時計回り）
+	var v_r := radial.dot(v)
+	var speed := sqrt(v_t * v_t + pow(v_r * Tuning.pole_redirect, 2.0))
+	var sign := signf(v_t)
+	if absf(v_t) < 0.3:
+		# ほぼ正面から突っ込んだ：体の向きで回る側を決める
+		var f := Vector2(_player.facing().x, _player.facing().z)
+		sign = 1.0 if radial.cross(f) >= 0.0 else -1.0
+	_pole_v = sign * speed
+	_pole_entry_speed = h.length()
+	_pole_vy = clampf(_player.velocity.y, -3.0, Tuning.jump_velocity)
+	_pole_swept = 0.0
 	_duration = Tuning.pole_max_time
 	_begin(Move.POLE)
 	last_left = "pole"
@@ -257,15 +278,34 @@ func _start_pole(pole: Node3D) -> void:
 func _drive_pole(delta: float) -> void:
 	var held := _player.input_enabled and Input.is_action_pressed("hand_left")
 	var jumped := _player.input_enabled and Input.is_action_just_pressed("jump")
-	_pole_r = move_toward(_pole_r, Tuning.pole_radius, 4.0 * delta)
-	var step := _pole_dir * _pole_speed / maxf(_pole_r, 0.1) * delta
-	_pole_angle += step
-	_pole_vy -= Tuning.gravity * Tuning.pole_gravity_mult * delta
 	var base := _pole.global_position
+	var radial := Vector3(cos(_pole_angle), 0.0, sin(_pole_angle))
+	var tangent := Vector3(-radial.z, 0.0, radial.x) # atan2 の角度が増える向き
+	var input := _player.input_direction()
+	# 腕の長さ：ポールへ倒すと縮め、離す向きへ倒すと伸ばす。角運動量を保つので縮めると速くなる
+	var pull := -input.dot(radial)
+	var target_r := Tuning.pole_max_radius if pull < -0.3 else (Tuning.pole_min_radius if pull > 0.3 else _pole_r)
+	var new_r := move_toward(_pole_r, target_r, Tuning.pole_pull_speed * delta)
+	_pole_v = clampf(_pole_v * _pole_r / new_r, -Tuning.pole_max_speed, Tuning.pole_max_speed)
+	_pole_r = new_r
+	# 回る向きへスティックを倒すとこげる（止まって掴んでも回り出せる）。こいで出せる速さには上限がある
+	var pump := input.dot(tangent)
+	if absf(pump) > 0.3 and (absf(_pole_v) < Tuning.pole_pump_cap or signf(pump) != signf(_pole_v)):
+		_pole_v += pump * Tuning.pole_pump * delta
+	_pole_v = move_toward(_pole_v, 0.0, Tuning.pole_friction * delta)
+	var step := _pole_v / maxf(_pole_r, 0.1) * delta
+	_pole_angle += step
+	_pole_swept += absf(step)
+	_pole_vy -= Tuning.gravity * Tuning.pole_gravity_mult * delta
 	var half := _pole_half_height(_pole)
 	var p := Vector3(base.x + cos(_pole_angle) * _pole_r, _player.global_position.y + _pole_vy * delta, base.z + sin(_pole_angle) * _pole_r)
-	p.y = clampf(p.y, base.y - half + 0.9, base.y + half + 0.4)
-	var tangent := Vector3(-sin(_pole_angle), 0.0, cos(_pole_angle)) * _pole_dir
+	var lo := base.y - half + 0.9
+	var hi := base.y + half + 0.4
+	if p.y <= lo or p.y >= hi:
+		_pole_vy = 0.0
+	p.y = clampf(p.y, lo, hi)
+	radial = Vector3(cos(_pole_angle), 0.0, sin(_pole_angle))
+	tangent = Vector3(-radial.z, 0.0, radial.x)
 	if not _player.can_stand_at(p):
 		_release_pole(tangent, false)
 		return
@@ -273,13 +313,16 @@ func _drive_pole(delta: float) -> void:
 	# rotate_y(a) は atan2(z, x) の角度を -a 動かすので、符号を反転して回る分だけ視点も回す
 	_player.turn(-step * Tuning.pole_camera_follow)
 	_update_pole_plant()
-	if jumped or not held or _t >= _duration:
+	if jumped or not held or _t >= _duration or _pole_swept >= deg_to_rad(Tuning.pole_max_turn):
 		_release_pole(tangent, jumped)
 
 
+## 接線の向きへ飛び出す。回っていた速さに加速を足し、上下はポールで持っていた速度と離す勢いの大きい方。
 func _release_pole(tangent: Vector3, jumped: bool) -> void:
-	var out := tangent * (_pole_speed + Tuning.pole_release_boost)
-	out.y = maxf(Tuning.pole_release_up, Tuning.jump_velocity if jumped else 0.0)
+	var speed := absf(_pole_v)
+	var out := tangent * signf(_pole_v) * (speed + Tuning.pole_release_boost if speed > 0.5 else speed)
+	var up := Tuning.jump_velocity if jumped else Tuning.pole_release_up
+	out.y = maxf(_pole_vy, up)
 	_left_needs_release = true
 	_finish(out)
 
@@ -290,17 +333,21 @@ func _update_pole_plant() -> void:
 	to_pole = to_pole.normalized() if to_pole.length() > 0.01 else _player.facing()
 	var radius := float(_pole.get("radius")) if _pole.get("radius") != null else 0.1
 	var point := Vector3(base.x, _player.global_position.y + 0.45, base.z) - to_pole * (radius + 0.04)
-	_set_plant(Side.LEFT, point, to_pole, Vector3.UP.cross(to_pole) * _pole_dir, "grip", 0.08)
+	var dir := 1.0 if _pole_v >= 0.0 else -1.0
+	_set_plant(Side.LEFT, point, to_pole, Vector3.UP.cross(to_pole) * dir, "grip", 0.08)
 
 
 # ---------- 右手：ボールト ----------
+# 進んでいる向きのまま越える（壁の法線へ向きを曲げない）。
+# 押すのが遅いほど（障害物に近いほど）強く押せる：vault_perfect_dist 以内ならジャスト、
+# 届く距離ぎりぎりで押すと加速は vault_early_ratio 倍。空中で押せば上下の勢いも持ち込む。
 
-## 前の低い障害物に手をついて越える。奥が深ければその上に乗る。
 func _try_vault() -> bool:
-	var dirs: Array[Vector3] = [_player.facing()]
+	var dirs: Array[Vector3] = []
 	var h := _hvel()
 	if h.length() > 1.0:
-		dirs.push_front(h.normalized())
+		dirs.append(h.normalized())
+	dirs.append(_player.facing())
 	for dir in dirs:
 		var v := find_vault(dir)
 		if not v.is_empty():
@@ -309,16 +356,17 @@ func _try_vault() -> bool:
 	return false
 
 
-## {face, normal, top, end}。なければ空。
+## dir（水平・単位ベクトル）の向きに越えられる障害物。{face, normal, top, end, over, gap, dir}。なければ空。
 func find_vault(dir: Vector3) -> Dictionary:
 	var feet := _player.feet_position()
-	var reach := _player.body_radius() + Tuning.vault_reach
+	var radius := _player.body_radius()
+	var reach := radius + Tuning.vault_reach
 	var face := _ray(feet + Vector3.UP * (Tuning.vault_min_height + 0.05), dir * reach)
 	if face.is_empty() or not _faces(face.normal, dir):
 		return {}
 	var n := _flat(face.normal)
 	var probe_top := feet.y + Tuning.vault_max_height + 0.4
-	var near: Vector3 = face.position - n * 0.1
+	var near: Vector3 = face.position + dir * 0.1
 	var top_hit := _ray(Vector3(near.x, probe_top, near.z), Vector3.DOWN * (probe_top - feet.y - 0.05))
 	if top_hit.is_empty() or top_hit.normal.y < 0.7:
 		return {}
@@ -326,35 +374,42 @@ func find_vault(dir: Vector3) -> Dictionary:
 	var height := top - feet.y
 	if height < Tuning.vault_min_height or height > Tuning.vault_max_height:
 		return {}
-	# 奥行きを測る：上面が続く間は前へ。1.6mを超えたら「上に乗る」
+	# 進む向きに奥行きを測る：上面が続く間は前へ。1.6mを超えたら「上に乗る」
 	var depth := 0.0
 	var over := false
 	while depth < 1.6:
 		depth += 0.2
-		var p: Vector3 = face.position - n * depth
+		var p: Vector3 = face.position + dir * depth
 		var hit := _ray(Vector3(p.x, top + 0.3, p.z), Vector3.DOWN * 0.45)
 		if hit.is_empty() or absf(hit.position.y - top) > 0.1:
 			over = true
 			break
-	var r := _player.body_radius()
 	var end: Vector3
 	if over:
-		end = face.position - n * (depth + r + 0.25)
+		end = face.position + dir * (depth + radius + 0.25)
 		end.y = maxf(top + STAND_CLEAR * 0.6, _player.global_position.y)
 	else:
-		end = face.position - n * (r + 0.5)
+		end = face.position + dir * (radius + 0.5)
 		end.y = top + STAND_CLEAR
-	var mid: Vector3 = face.position - n * minf(depth, 0.8) * 0.5
+	var mid: Vector3 = face.position + dir * minf(depth, 0.8) * 0.5
 	mid.y = top + STAND_CLEAR
 	if not _player.can_stand_at(end) or not _player.can_stand_at(mid):
 		return {}
-	return {"face": face.position, "normal": n, "top": top, "end": end, "over": over}
+	var center := _player.global_position
+	var gap := Vector2(face.position.x - center.x, face.position.z - center.z).length() - radius
+	return {"face": face.position, "normal": n, "top": top, "end": end, "over": over, "gap": gap, "dir": dir}
 
 
 func _start_vault(v: Dictionary) -> void:
-	var n: Vector3 = v.normal
+	var dir: Vector3 = v.dir
 	var entry := _hvel().length()
-	_exit = -n * maxf(entry + Tuning.vault_boost, Tuning.vault_min_exit)
+	# 押すのが遅いほど強い（障害物に近いほど1）
+	var span := maxf(Tuning.vault_reach - Tuning.vault_perfect_dist, 0.01)
+	vault_quality = 1.0 - clampf((float(v.gap) - Tuning.vault_perfect_dist) / span, 0.0, 1.0)
+	var boost := Tuning.vault_boost * lerpf(Tuning.vault_early_ratio, 1.0, vault_quality)
+	_exit = dir * maxf(entry + boost, Tuning.vault_min_exit)
+	# 空中で押したら上向きの勢いは残す（下向きは手で受け止める）
+	_exit.y = maxf(_player.velocity.y, 0.0) * 0.5
 	_from = _player.global_position
 	_to = v.end
 	var top: float = v.top
@@ -365,8 +420,9 @@ func _start_vault(v: Dictionary) -> void:
 	_begin(Move.VAULT)
 	last_right = "vault"
 	var face: Vector3 = v.face
+	var n: Vector3 = v.normal
 	var hand := Vector3(face.x, top + 0.03, face.z) - n * 0.2
-	_set_plant(Side.RIGHT, hand, Vector3.DOWN, -n, "flat", _duration * 0.7)
+	_set_plant(Side.RIGHT, hand, Vector3.DOWN, dir, "flat", _duration * 0.7)
 
 
 func _drive_vault() -> void:
@@ -379,8 +435,9 @@ func _drive_vault() -> void:
 
 
 # ---------- 右手：壁押し ----------
+# 壁へ向かっていた分は wall_push_bounce の割合で跳ね返し、そこへ押す力を足す。壁沿いの勢いは保つ。
+# スティックを倒していればその向きへ押し出す（壁へ向けて倒しても壁からは必ず離れる）。
 
-## 横や前の壁を突き放して、壁から離れる向きへ加速する。壁沿いの勢いは保つ。
 func _try_wall_push() -> bool:
 	var hit := _find_push_wall()
 	if hit.is_empty():
@@ -391,13 +448,19 @@ func _try_wall_push() -> bool:
 	if along != Vector3.ZERO:
 		# 壁走り中は、押し付けていた分を除いた壁沿いの速さで出る
 		v = along * _hvel().dot(along) + Vector3.UP * v.y
-	var into := v.dot(n)
+	var h := Vector3(v.x, 0.0, v.z)
+	var into := h.dot(n)
 	if into < 0.0:
-		v -= n * into
-	v += n * Tuning.wall_push_speed
-	v.y = maxf(v.y, Tuning.wall_push_up)
+		h -= n * into * (1.0 + Tuning.wall_push_bounce)
+	h += n * Tuning.wall_push_speed
+	var input := _player.input_direction()
+	if input.length() > 0.1:
+		var d := input.normalized()
+		var side := d - n * d.dot(n)
+		d = (side + n * maxf(d.dot(n), Player.WALL_JUMP_MIN_OUT)).normalized()
+		h = d * h.length()
 	_player.leave_wall(n)
-	_player.velocity = v
+	_player.velocity = Vector3(h.x, maxf(v.y, Tuning.wall_push_up), h.z)
 	_pushed_normal = n
 	last_right = "push"
 	var p: Vector3 = hit.position

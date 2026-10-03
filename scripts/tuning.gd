@@ -56,8 +56,15 @@ const SPECS := [
 	["mantle_keep", "縁掴みで持ち出す水平速度の割合", 0.0, 1.0, 0.05],
 	["mantle_min_exit", "縁掴みの後の最低の前向き速度 (m/s)", 0.0, 10.0, 0.1],
 	["pole_reach", "ポール：手が届く距離（ポールの中心から）(m)", 0.4, 2.5, 0.05],
-	["pole_radius", "ポール：回る半径 (m)", 0.3, 1.5, 0.05],
-	["pole_min_speed", "ポール：回る最低速度 (m/s)", 0.0, 12.0, 0.1],
+	["pole_min_radius", "ポール：腕を縮めたときの半径 (m)", 0.2, 1.0, 0.05],
+	["pole_max_radius", "ポール：腕を伸ばしたときの半径 (m)", 0.5, 2.0, 0.05],
+	["pole_redirect", "ポール：ポールへ向かう速さを回る速さへ振り替える割合", 0.0, 1.0, 0.05],
+	["pole_pull_speed", "ポール：腕を縮める・伸ばす速さ (m/s)", 0.0, 5.0, 0.1],
+	["pole_max_speed", "ポール：回る速さの上限 (m/s)", 4.0, 25.0, 0.5],
+	["pole_pump", "ポール：スティックでこぐ加速 (m/s²)", 0.0, 40.0, 0.5],
+	["pole_pump_cap", "ポール：こいで出せる速さの上限 (m/s)", 0.0, 15.0, 0.1],
+	["pole_friction", "ポール：回る速さの減り (m/s²)", 0.0, 10.0, 0.1],
+	["pole_max_turn", "ポール：回れる角度の上限 (度)", 90.0, 1080.0, 15.0],
 	["pole_max_time", "ポール：掴んでいられる上限 (秒)", 0.2, 3.0, 0.05],
 	["pole_gravity_mult", "ポール：掴んでいる間の重力倍率", 0.0, 1.0, 0.01],
 	["pole_release_boost", "ポール：離すときの加速 (m/s)", 0.0, 6.0, 0.1],
@@ -67,11 +74,14 @@ const SPECS := [
 	["vault_min_height", "ボールト：越えられる最低の高さ (m)", 0.0, 1.0, 0.05],
 	["vault_max_height", "ボールト：越えられる最高の高さ (m)", 0.5, 2.0, 0.05],
 	["vault_time", "ボールトの時間 (秒)", 0.1, 0.8, 0.01],
-	["vault_boost", "ボールトの加速 (m/s)", 0.0, 6.0, 0.1],
+	["vault_boost", "ボールトの加速 ジャスト (m/s)", 0.0, 6.0, 0.1],
+	["vault_perfect_dist", "ボールト：ジャストになる障害物までの距離 (m)", 0.0, 1.0, 0.05],
+	["vault_early_ratio", "ボールト：届くぎりぎりで押したときの加速の割合", 0.0, 1.0, 0.05],
 	["vault_min_exit", "ボールトの後の最低の前向き速度 (m/s)", 0.0, 10.0, 0.1],
 	["wall_push_reach", "壁押し：壁までの距離（体の表面から）(m)", 0.2, 2.0, 0.05],
 	["wall_push_speed", "壁押し：壁から離れる速さ (m/s)", 0.0, 15.0, 0.1],
 	["wall_push_up", "壁押し：上向き速度 (m/s)", 0.0, 10.0, 0.1],
+	["wall_push_bounce", "壁押し：壁へ向かっていた速さを跳ね返す割合", 0.0, 1.0, 0.05],
 	["hand_reach_time", "手を伸ばして届くまでの時間 (秒)", 0.02, 0.3, 0.01],
 	["hand_return_time", "手が戻るまでの時間 (秒)", 0.05, 0.6, 0.01],
 	["arm_swing", "走るときの腕の振り (m, 0でオフ)", 0.0, 0.2, 0.005],
@@ -148,11 +158,18 @@ var ledge_reach_dist := 0.7
 var mantle_time := 0.32
 var mantle_keep := 0.85
 var mantle_min_exit := 3.0
-var pole_reach := 1.2
-var pole_radius := 0.7
-var pole_min_speed := 5.0
-var pole_max_time := 1.2
-var pole_gravity_mult := 0.15
+var pole_reach := 1.1
+var pole_min_radius := 0.45 # 腕を曲げてポールに体を寄せた半径
+var pole_max_radius := 1.05 # 腕を伸ばしきった半径（体の半径を含む）
+var pole_redirect := 0.75 # 正面から8 m/sで突っ込むと6 m/sで回る。かすめて掴めばほぼそのまま
+var pole_pull_speed := 1.5
+var pole_max_speed := 14.0
+var pole_pump := 12.0
+var pole_pump_cap := 5.0
+var pole_friction := 1.0
+var pole_max_turn := 450.0 # 1周と4分の1で手が離れる
+var pole_max_time := 1.6
+var pole_gravity_mult := 0.35
 var pole_release_boost := 1.5
 var pole_release_up := 3.0
 var pole_camera_follow := 1.0
@@ -160,11 +177,14 @@ var vault_reach := 0.9
 var vault_min_height := 0.3
 var vault_max_height := 1.3
 var vault_time := 0.3
-var vault_boost := 1.5
+var vault_boost := 2.0
+var vault_perfect_dist := 0.35 # 体の表面から障害物まで35cm以内で押せばジャスト
+var vault_early_ratio := 0.3
 var vault_min_exit := 4.0
 var wall_push_reach := 0.8
 var wall_push_speed := 6.0
 var wall_push_up := 3.0
+var wall_push_bounce := 0.5
 var hand_reach_time := 0.07
 var hand_return_time := 0.18
 var arm_swing := 0.06

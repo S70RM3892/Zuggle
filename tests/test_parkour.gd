@@ -36,9 +36,14 @@ func _run() -> void:
 	await _test_climb_and_grab()
 	await _test_ledge_from_jump()
 	await _test_vault()
+	await _test_vault_keeps_direction()
 	await _test_wall_push_from_wallrun()
 	await _test_wall_push_on_ground()
+	await _test_wall_push_steer_and_bounce()
+	await _test_pole_entry_angle()
+	await _test_pole_pull_in()
 	await _test_pole_swing()
+	await _test_pole_limits()
 	await _test_whiff()
 	print("\n%s" % ("ALL PASSED" if _failures == 0 else "%d FAILED" % _failures))
 	get_tree().quit(1 if _failures > 0 else 0)
@@ -264,17 +269,54 @@ func _test_ledge_from_jump() -> void:
 	_release_all()
 
 
-func _test_vault() -> void:
-	print("右手でボールト")
-	await _stand(Vector3(22, 0.9, 11))
-	await _run_until_z(7.3)
+## ボールト箱へ向かって走り、体の表面から箱までが gap になったところで右手を押す。押す前の速さを返す。
+func _vault_at(gap: float, yaw := 0.0, x := 22.0) -> float:
+	await _stand(Vector3(x, 0.9, 11), yaw)
+	Input.action_press("move_forward")
+	var face_z := 6.4
+	var limit := int(3.0 / DT)
+	while _player.global_position.z > face_z + 0.35 + gap and limit > 0:
+		limit -= 1
+		await get_tree().physics_frame
 	var speed := _player.horizontal_speed()
 	await _tap("hand_right")
+	return speed
+
+
+func _test_vault() -> void:
+	print("右手でボールト（押すのが遅いほど強い）")
+	var speed := await _vault_at(0.2)
 	_check(_actions.last_right == "vault", "低い障害物に手をついて越える")
+	_check(_actions.vault_quality > 0.9, "近くで押せばジャスト (%.2f)" % _actions.vault_quality)
 	while _actions.is_busy():
 		await get_tree().physics_frame
 	_check(_player.global_position.z < 5.4, "向こう側へ出る (z %.2f)" % _player.global_position.z)
-	_check(_player.horizontal_speed() > speed + Tuning.vault_boost * 0.7, "加速する (%.2f → %.2f)" % [speed, _player.horizontal_speed()])
+	var late := _player.horizontal_speed() - speed
+	_check(late > Tuning.vault_boost * 0.9, "ジャストは大きく加速する (+%.2f)" % late)
+	_release_all()
+	speed = await _vault_at(Tuning.vault_reach - 0.02)
+	_check(_actions.last_right == "vault" and _actions.vault_quality < 0.5, "届くぎりぎりで押しても越える (%.2f)" % _actions.vault_quality)
+	while _actions.is_busy():
+		await get_tree().physics_frame
+	var early := _player.horizontal_speed() - speed
+	_check(early > 0.0 and early < late - 0.8, "早押しは加速が小さい (+%.2f < +%.2f)" % [early, late])
+	_release_all()
+
+
+func _test_vault_keeps_direction() -> void:
+	print("斜めに越えても向きを曲げない")
+	await _stand(Vector3(23.5, 0.9, 11), 20.0)
+	Input.action_press("move_forward")
+	await _frames(int(0.4 / DT))
+	var dir := Vector3(_player.velocity.x, 0, _player.velocity.z).normalized()
+	while _player.global_position.z > 7.0:
+		await get_tree().physics_frame
+	await _tap("hand_right")
+	_check(_actions.last_right == "vault", "斜めでも越える")
+	while _actions.is_busy():
+		await get_tree().physics_frame
+	var out := Vector3(_player.velocity.x, 0, _player.velocity.z).normalized()
+	_check(out.dot(dir) > 0.98, "進んでいた向きのまま出る (%.0f 度ずれ)" % rad_to_deg(acos(clampf(out.dot(dir), -1.0, 1.0))))
 	_release_all()
 
 
@@ -315,20 +357,91 @@ func _test_wall_push_on_ground() -> void:
 	_release_all()
 
 
+func _test_wall_push_steer_and_bounce() -> void:
+	print("壁押しはスティックの向きへ、壁へ向かう勢いは跳ね返す")
+	# yaw -90度で前が+X。壁は+Z側（z=17.5）
+	await _stand(Vector3(-5, 0.9, 17.5 - 0.5), -90.0)
+	Input.action_press("move_forward")
+	await _tap("hand_right")
+	_check(_player.velocity.x > 3.0 and _player.velocity.z < -1.0, "前へ倒せば壁沿い前方へ押し出す (vx %.2f, vz %.2f)" % [_player.velocity.x, _player.velocity.z])
+	_release_all()
+	await _stand(Vector3(-5, 0.9, 17.5 - 0.5), -90.0)
+	_player.global_position = Vector3(-5, 2.5, 17.5 - 0.6)
+	_player.velocity = Vector3(0, 0, 4)
+	await _frames(1)
+	_player.velocity = Vector3(0, 0, 4)
+	await _tap("hand_right")
+	var expected := -(4.0 * Tuning.wall_push_bounce + Tuning.wall_push_speed)
+	_check(_actions.last_right == "push" and _player.velocity.z < expected + 0.6, "壁へ4 m/sで向かっていたら跳ね返す (vz %.2f, 目安 %.2f)" % [_player.velocity.z, expected])
+	_release_all()
+
+
+## PoleA（-20, 0〜4, 0）の脇の空中 offset に置き、vel で動かしながら左手を握らせる。
+func _grab_pole(offset: Vector3, vel: Vector3, yaw := 0.0) -> bool:
+	_release_all()
+	_player.respawn()
+	await _frames(5)
+	_player.rotation = Vector3(0, deg_to_rad(yaw), 0)
+	_player.global_position = Vector3(-20, 1.6, 0) + offset
+	_player.velocity = Vector3.ZERO
+	await _frames(1)
+	_player.velocity = vel
+	Input.action_press("hand_left")
+	for i in 10:
+		await get_tree().physics_frame
+		if _actions.move == HandActions.Move.POLE:
+			return true
+	return false
+
+
+func _pole_speed() -> float:
+	return absf(_actions._pole_v)
+
+
+func _test_pole_entry_angle() -> void:
+	print("ポール：入る向きで回り方が変わる")
+	_check(await _grab_pole(Vector3(0.8, 0, 0), Vector3(0, 0, -8)), "脇をかすめて掴む")
+	await _frames(int(0.1 / DT))
+	var tangential := _pole_speed()
+	_check(tangential > 7.5, "かすめて掴めば勢いのまま回る (%.2f)" % tangential)
+	_check(_actions.move == HandActions.Move.POLE, "回っている")
+	_check(await _grab_pole(Vector3(0, 0, 0.8), Vector3(0, 0, -8)), "正面から掴む")
+	await _frames(int(0.1 / DT))
+	var head_on := _pole_speed()
+	_check(head_on < tangential - 1.0 and head_on > 4.0, "正面から突っ込むと回る速さは落ちる (%.2f)" % head_on)
+	_check(await _grab_pole(Vector3(0.8, 0, 0), Vector3.ZERO), "止まって掴む")
+	await _frames(int(0.3 / DT))
+	_check(_actions._pole_swept < deg_to_rad(5.0), "勢いがなければ回らない (%.1f 度)" % rad_to_deg(_actions._pole_swept))
+	Input.action_press("move_forward")
+	await _frames(int(0.4 / DT))
+	_check(_pole_speed() > 2.0, "回る向きへ倒すとこげる (%.2f)" % _pole_speed())
+	_release_all()
+
+
+func _test_pole_pull_in() -> void:
+	print("ポール：腕を縮めると速く回る")
+	_check(await _grab_pole(Vector3(0.8, 0, 0), Vector3(0, 0, -8)), "掴む")
+	var before := _pole_speed()
+	# 視点が回る分だけ体も回るので、左（掴んだときのポールの側）はずっとポールの向き
+	Input.action_press("move_left")
+	await _frames(int(0.3 / DT))
+	_check(_actions._pole_r < 0.6, "腕を縮める (半径 %.2f)" % _actions._pole_r)
+	_check(_pole_speed() > before * 1.2, "角運動量を保って速くなる (%.2f → %.2f)" % [before, _pole_speed()])
+	_release_all()
+
+
 func _test_pole_swing() -> void:
-	print("左手でポールを掴んで回る")
+	print("ポール：走って掴んで離す")
 	await _stand(Vector3(-19.4, 0.9, 7))
 	Input.action_press("move_forward")
 	await _frames(int(0.6 / DT))
 	Input.action_press("hand_left")
 	var yaw0 := _player.rotation.y
-	var speed := 0.0
 	var grabbed := false
 	for i in int(1.5 / DT):
 		await get_tree().physics_frame
 		if _actions.move == HandActions.Move.POLE:
 			grabbed = true
-			speed = _actions._pole_speed
 			break
 	_check(grabbed, "近くを通るとポールを掴む")
 	if not grabbed:
@@ -339,13 +452,30 @@ func _test_pole_swing() -> void:
 	var hand := _hands.hand_position(HandActions.Side.LEFT)
 	_check(Vector2(hand.x - pole.x, hand.z - pole.z).length() < 0.35, "左手がポールを握っている (%.2f m)" % Vector2(hand.x - pole.x, hand.z - pole.z).length())
 	var d := Vector2(_player.global_position.x - pole.x, _player.global_position.z - pole.z).length()
-	_check(absf(d - Tuning.pole_radius) < 0.15, "ポールの周りを回る (半径 %.2f)" % d)
+	_check(d >= Tuning.pole_min_radius - 0.01 and d <= Tuning.pole_max_radius + 0.01, "腕の届く範囲で回る (半径 %.2f)" % d)
 	_check(absf(wrapf(_player.rotation.y - yaw0, -PI, PI)) > deg_to_rad(45.0), "視点もついて回る (%.0f 度)" % rad_to_deg(absf(wrapf(_player.rotation.y - yaw0, -PI, PI))))
+	var speed := _pole_speed()
 	Input.action_release("hand_left")
 	await _frames(2)
 	_check(not _actions.is_busy(), "離すと手を放す")
 	_check(_player.horizontal_speed() > speed + Tuning.pole_release_boost * 0.8, "加速して飛び出す (%.2f → %.2f)" % [speed, _player.horizontal_speed()])
 	_check(_player.velocity.y > 0.0, "少し上へ (vy %.2f)" % _player.velocity.y)
+	_release_all()
+
+
+func _test_pole_limits() -> void:
+	print("ポール：回れる角度に上限があり、跳んで掴めば上る")
+	_check(await _grab_pole(Vector3(0.8, 0, 0), Vector3(0, 0, -8)), "掴む")
+	var limit := int(Tuning.pole_max_time / DT) + 10
+	while _actions.is_busy() and limit > 0:
+		limit -= 1
+		await get_tree().physics_frame
+	_check(not _actions.is_busy(), "押しっぱなしでも上限で手が離れる")
+	_check(_actions._pole_swept <= deg_to_rad(Tuning.pole_max_turn) + 0.2, "上限の角度まで (%.0f 度)" % rad_to_deg(_actions._pole_swept))
+	_check(await _grab_pole(Vector3(0.8, 0, 0), Vector3(0, 4, -8)), "上へ跳びながら掴む")
+	var y0 := _player.global_position.y
+	await _frames(int(0.2 / DT))
+	_check(_player.global_position.y > y0 + 0.4, "上向きの勢いでポールを上る (+%.2f m)" % (_player.global_position.y - y0))
 	_release_all()
 
 

@@ -543,6 +543,11 @@ func _along_wall(n: Vector3, prefer: Vector3) -> Vector3:
 	return t if t.dot(prefer) >= 0.0 else -t
 
 
+## スティックの向き（ワールド・水平）。手のアクションが使う。
+func input_direction() -> Vector3:
+	return _input_direction()
+
+
 func _input_direction() -> Vector3:
 	if not input_enabled:
 		return Vector3.ZERO
