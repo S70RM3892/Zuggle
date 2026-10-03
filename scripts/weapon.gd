@@ -11,16 +11,27 @@ enum State { IDLE, WINDUP, ACTIVE, RECOVERY, INSPECT }
 # 指の曲げ角（度）。各指は付け根・中・先の3関節。正で手のひら側へ曲がる
 const CURL_GRIP := {
 	"index": [80.0, 95.0, 55.0], "middle": [80.0, 95.0, 55.0], "ring": [82.0, 95.0, 55.0],
-	"pinky": [85.0, 95.0, 55.0], "thumb": [25.0, 45.0, 40.0],
+	"pinky": [85.0, 95.0, 55.0], "thumb": [30.0, 25.0, 25.0],
 }
 # ナイフを回している間：人差し指は輪に通したまま、ほかの指を開いて刃の通り道を空ける
 const CURL_SPIN := {
 	"index": [70.0, 90.0, 50.0], "middle": [15.0, 10.0, 5.0], "ring": [20.0, 10.0, 5.0],
 	"pinky": [25.0, 10.0, 5.0], "thumb": [5.0, 10.0, 10.0],
 }
+# 親指の付け根のひねり（度）：y=骨の軸まわり、z=手のひらの面の中で人差し指の側へ。
+# 曲げるだけでは親指が手のひらの前へまっすぐ突き出るので、指の上を横切るように寄せる
+const THUMB_TURN_GRIP := Vector2(-25.0, 40.0)
+const THUMB_TURN_SPIN := Vector2(-5.0, 10.0)
 const INSPECT_TIME := 1.0
 const SPIN_TURNS := 2.0
 const POSE_INSPECT := Vector3(8.0, 12.0, 30.0) # 回す間は少し持ち上げ、ひねって見せる
+# ナイフの回り方：指ではじいた勢いで回り、刃先が上へ行くときは重さで遅く、下るときは速くなる。
+# 指の摩擦で少しずつ遅くなり、最後は指で受け止めて止める
+const SPIN_FLICK := 0.12 # はじいて最高速になるまでの角度（ラジアン）
+const SPIN_GRAVITY := 0.22 # 刃先の高さ1あたりの速さ²の減り（はじいた直後の速さ²を1とする）
+const SPIN_FRICTION := 0.035 # 1ラジアンあたりの速さ²の減り
+const SPIN_CATCH := 0.6 # 受け止めて止めるまでの角度（ラジアン）
+const SPIN_STEPS := 256
 
 const MODEL_PATH := "res://models/weapon.glb"
 const HURTBOX_LAYER := 2 # ダミーなど、斬られる側の当たり判定の層
@@ -68,6 +79,7 @@ var _grip_rest: Transform3D
 var _spin_pivot := Vector3.ZERO # ナイフを回す軸（輪の中心）。Gripの座標
 var _spin := 0.0 # ナイフの回転（ラジアン）
 var _open := 0.0 # 指の開き。0で握る、1でナイフ回しの形
+var _spin_time := PackedFloat32Array() # 回転角を SPIN_STEPS 等分したときの、そこまでの時間（0〜1）
 var _skeleton: Skeleton3D
 
 @onready var swing: Node3D = $Swing
@@ -122,6 +134,7 @@ func hitbox_transform() -> Transform3D:
 ## ナイフ回し：輪に通した人差し指を軸に、ナイフを2回転させて握り直す。
 func _start_inspect() -> void:
 	inspect_count += 1
+	_build_spin_table()
 	_from = _pose
 	_t = 0.0
 	state = State.INSPECT
@@ -166,13 +179,47 @@ func _advance(delta: float) -> void:
 			var x := _ratio(INSPECT_TIME)
 			# 指を開く(0〜0.15) → 回す(0.1〜0.8) → 握り直す(0.75〜1.0)
 			_open = smoothstep(0.0, 0.15, x) * (1.0 - smoothstep(0.75, 1.0, x))
-			_spin = TAU * SPIN_TURNS * smoothstep(0.1, 0.8, x)
+			_spin = _spin_angle(clampf((x - 0.1) / 0.7, 0.0, 1.0))
 			var lift := sin(PI * x)
 			_pose = _from.lerp(POSE_IDLE, minf(1.0, x * 4.0)).lerp(POSE_INSPECT, lift)
 			if x >= 1.0:
 				_spin = 0.0
 				_open = 0.0
 				_next(State.IDLE)
+
+
+## 回す速さの表を作る。回転角θでの速さωを、はじいた勢い・刃先の高さ・摩擦・受け止めから決め、
+## dθ/ω を足し合わせて「θまで回るのにかかる時間」を求める。
+func _build_spin_table() -> void:
+	var total := TAU * SPIN_TURNS
+	# 刃先(Gripの-Z)の高さ。回転軸はGripのX。上向きをGripの座標に直す
+	var up := (swing.global_basis.orthonormalized() * _grip_rest.basis.orthonormalized()).inverse() * Vector3.UP
+	var h0 := -up.z
+	_spin_time.resize(SPIN_STEPS + 1)
+	_spin_time[0] = 0.0
+	var dth := total / SPIN_STEPS
+	var acc := 0.0
+	for i in SPIN_STEPS:
+		var th := (i + 0.5) * dth
+		var h := up.y * sin(th) - up.z * cos(th)
+		var w2 := 1.0 - SPIN_GRAVITY * (h - h0) - SPIN_FRICTION * th
+		var w := sqrt(maxf(w2, 0.06))
+		w *= lerpf(0.35, 1.0, smoothstep(0.0, SPIN_FLICK, th)) # はじく
+		w *= lerpf(0.15, 1.0, smoothstep(0.0, SPIN_CATCH, total - th)) # 受け止める
+		acc += dth / w
+		_spin_time[i + 1] = acc
+	for i in SPIN_STEPS + 1:
+		_spin_time[i] /= acc
+
+
+## 回し始めてからの時間の割合 p（0〜1）での回転角。
+func _spin_angle(p: float) -> float:
+	if _spin_time.is_empty():
+		_build_spin_table()
+	var i := clampi(_spin_time.bsearch(p) - 1, 0, SPIN_STEPS - 1)
+	var span := _spin_time[i + 1] - _spin_time[i]
+	var f := 0.0 if span <= 0.0 else clampf((p - _spin_time[i]) / span, 0.0, 1.0)
+	return (i + f) * TAU * SPIN_TURNS / SPIN_STEPS
 
 
 func _next(s: State) -> void:
@@ -274,9 +321,12 @@ func _apply_hand() -> void:
 			var idx := _skeleton.find_bone("%s_%d" % [finger, k + 1])
 			if idx < 0:
 				continue
-			var angle := deg_to_rad(lerpf(closed[k], opened[k], _open))
+			var euler := Vector3(lerpf(closed[k], opened[k], _open), 0.0, 0.0)
+			if finger == "thumb" and k == 0:
+				var turn := THUMB_TURN_GRIP.lerp(THUMB_TURN_SPIN, _open)
+				euler = Vector3(euler.x, turn.x, turn.y)
 			var rest := _skeleton.get_bone_rest(idx).basis.get_rotation_quaternion()
-			_skeleton.set_bone_pose_rotation(idx, rest * Quaternion(Vector3.RIGHT, angle))
+			_skeleton.set_bone_pose_rotation(idx, rest * Quaternion.from_euler(euler * PI / 180.0))
 
 
 func _find_player() -> Player:

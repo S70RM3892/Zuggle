@@ -220,16 +220,25 @@ func _test_inspect() -> void:
 	var turned := 0.0
 	var last := rest
 	var frames := 0
+	var steps: Array[float] = []
 	while _weapon.is_inspecting() and frames < 400:
 		await get_tree().physics_frame
 		frames += 1
 		var a := _knife_angle()
-		turned += absf(wrapf(a - last, -PI, PI))
+		var step := absf(wrapf(a - last, -PI, PI))
+		turned += step
 		last = a
+		steps.append(step)
 	var secs := frames * DT
 	_check(absf(secs - Weapon.INSPECT_TIME) < 0.05, "約%.1f秒で終わる (%.2f 秒)" % [Weapon.INSPECT_TIME, secs])
 	_check(absf(turned - TAU * Weapon.SPIN_TURNS) < 0.3, "%d回転する (%.1f 回転)" % [int(Weapon.SPIN_TURNS), turned / TAU])
 	_check(absf(wrapf(_knife_angle() - rest, -PI, PI)) < 0.01, "握り直して元の向きに戻る")
+	# 一定の速さ（または加速→減速の1山）ではなく、1回転ごとに刃先が下るとき速く、上るとき遅くなる
+	var peaks := 0
+	for i in range(1, steps.size() - 1):
+		if steps[i] > steps[i - 1] + 0.001 and steps[i] >= steps[i + 1]:
+			peaks += 1
+	_check(peaks >= int(Weapon.SPIN_TURNS), "1回転ごとに速さが変わる (速さの山 %d)" % peaks)
 
 
 func _test_attack_cancels_inspect() -> void:
@@ -253,3 +262,9 @@ func _test_hand_rig() -> void:
 	var idx := skel.find_bone("middle_1")
 	var gripped := skel.get_bone_pose_rotation(idx).angle_to(skel.get_bone_rest(idx).basis.get_rotation_quaternion())
 	_check(gripped > deg_to_rad(60.0), "構えでは指を握っている (%.0f 度)" % rad_to_deg(gripped))
+	# 親指の先が手の前へ突き出ず、握った人差し指の上に乗っている
+	var tip := skel.get_bone_global_pose(skel.find_bone("thumb_3"))
+	var thumb_tip := tip.origin
+	var index_mid := skel.get_bone_global_pose(skel.find_bone("index_2")).origin
+	var gap := thumb_tip.distance_to(index_mid) * skel.global_basis.get_scale().x
+	_check(gap < 0.06, "親指は人差し指の上に乗る (%.3f m)" % gap)
