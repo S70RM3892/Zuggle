@@ -1,7 +1,13 @@
 class_name Player
 extends CharacterBody3D
 ## 一人称プレイヤー。M1：走り・ジャンプ・コヨーテタイム・先行入力。M2：壁走り（方向転換・壁ジャンプ）。M3：画面揺れ。
+## M4：斬撃モード（RT / 右クリックを押している間）は、右スティックとマウスを視点ではなくアナログ斬りに使う。
+## M5：スライディング（B / Ctrl / C）、左手での乗り越え・よじ登り（壁走り中に壁へ倒すと壁の上へ）。
+## スーパーグライド：よじ登りで縁を越える頃にジャンプとしゃがみ（スライディング）をほぼ同時に押すと、低く速く飛ぶ。
 ## 大原則：動作を切り替えても水平方向の速度を落とさない。
+
+## 動きの技の結果（スーパーグライドの成否と間の長さなど）。HUDが表示する
+signal move_tech(text: String, success: bool)
 
 const PITCH_LIMIT := deg_to_rad(89.0)
 const BOB_FREQ := 1.6 # 1mあたりの揺れの位相（ラジアン）
@@ -12,6 +18,22 @@ const WALL_STICK := 1.0 # 壁走り中に壁へ押し付ける速度 (m/s)
 const WALL_PUSH_OFF := 1.0 # 時間切れで壁から離れるときの速度 (m/s)
 const WALL_JUMP_MIN_OUT := 0.35 # スティックで向きを決めても、壁から離れる成分はこれ以上残す
 const WORLD_LAYER := 1 # 壁走りの対象にする層。ダミー（層2）では壁走りしない
+const STAND_HEIGHT := 1.8 # 立っているときの体（カプセル）の高さ
+const SLIDE_HEIGHT := 1.0 # スライディング中の体の高さ。足の位置は変えずに縮める
+const EYE_STAND := 0.75 # 体の中心から目までの高さ
+const EYE_SLIDE := -0.05 # スライディング中は足から0.85m
+const SLIDE_STEER := 2.0 # スライディング中にスティックで向きを変える速さ（単位ベクトルの変化/秒）
+const SLIDE_BUFFER := 0.2 # 着地前に押したスライディングを受け付ける時間 (秒)
+const LEDGE_MIN := 0.15 # 足からこれより低い段は乗り越えの対象にしない (m)
+const LEDGE_PROBE_IN := 0.3 # 縁から奥へこれだけ入った所で上面を探す (m)
+const LEDGE_MAX_ANGLE := 50.0 # 壁の正面からこの角度以内へ向かっていれば乗り越える (度)
+const LEDGE_WALLRUN_INTO := 0.5 # 壁走り中、スティックの壁へ向かう成分がこれ以上なら壁の上へよじ登る
+const LEDGE_EXIT_MIN := 3.0 # よじ登った後に前へ進む最低の速さ (m/s)
+const PUSH_TIME := 0.18 # 壁ジャンプで左手が壁を押している時間 (秒)
+const GLIDE_OPEN := 0.5 # よじ登りのうち、この割合から受付を開く（体が縁の高さまで上がり、前へ出始める頃）
+const GLIDE_HINT_TIME := 0.3 # これ以内のずれなら、スーパーグライドの失敗として何が悪かったかを出す
+
+enum Ledge { NONE, VAULT, MANTLE }
 
 ## falseの間は入力を読まない（デバッグUIを開いているときなど）
 var input_enabled := true
@@ -32,6 +54,33 @@ var _wall_normal := Vector3.ZERO
 var _wall_dir := Vector3.ZERO # 壁に沿って進む向き（水平・単位ベクトル）
 var _blocked_wall_normal := Vector3.ZERO # 着地するまで同じ壁には入り直さない
 
+var _sliding := false
+var _slide_time := 0.0
+var _slide_buffer := 0.0
+var _eye := EYE_STAND
+
+var _ledge := Ledge.NONE # 乗り越え・よじ登りの途中か
+var _ledge_t := 0.0
+var _ledge_time := 0.0
+var _ledge_from := Vector3.ZERO
+var _ledge_to := Vector3.ZERO
+var _ledge_exit := Vector3.ZERO # 終わったときの速度
+var _ledge_edge := Vector3.ZERO # 左手をつく縁（ワールド座標）
+var _ledge_dir := Vector3.ZERO # 越える向き（水平・単位ベクトル）
+
+var _time := 0.0 # 物理の時計（ジャンプとしゃがみを押した時刻を比べる）
+var _jump_at := -INF
+var _slide_at := -INF
+var _glide_open := -INF # スーパーグライドの受付（縁を越え始めてから、登り切った少し後まで）
+var _glide_close := -INF
+var _glide_upgrade_until := -INF # 受付中にジャンプした直後。この時刻までにしゃがめばスーパーグライドになる
+var _glide_reported := true # 1回のよじ登りで結果を1度だけ出す
+var _slide_on_land := false # スーパーグライドの後。着地したらスライディングに入る
+
+var _push_timer := 0.0 # 壁ジャンプで壁を押した左手の残り時間
+var _push_point := Vector3.ZERO
+var _push_normal := Vector3.ZERO
+
 var _trauma := 0.0 # 画面揺れの元。0〜1。揺れの大きさはこの2乗
 var _shake_time := 0.0
 var _roll := 0.0
@@ -39,17 +88,20 @@ var _noise := FastNoiseLite.new()
 
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
+@onready var _collision: CollisionShape3D = $Collision
 @onready var _body_radius: float = ($Collision.shape as CapsuleShape3D).radius
 
 
 func _ready() -> void:
 	_spawn_transform = global_transform
+	# スライディングで高さを変えるので、シーンの形を書き換えないよう複製する
+	_collision.shape = _collision.shape.duplicate()
 	_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_noise.frequency = 1.0
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not input_enabled:
+	if not input_enabled or slash_mode():
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var deg_per_px := Tuning.mouse_sensitivity
@@ -57,13 +109,29 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if input_enabled:
+	if input_enabled and not slash_mode():
 		_process_stick_look(delta)
+	_time += delta
 	_update_timers(delta)
+	_handle_glide_inputs()
+	if _ledge != Ledge.NONE:
+		# 乗り越え・よじ登りの間は決めた道筋をなぞる（当たり判定は始める前に確かめてある）
+		_apply_ledge(delta)
+		_update_camera(delta)
+		return
 	if _wallrunning:
 		_apply_wallrun(delta)
 		if _jump_buffer_timer > 0.0:
 			_wall_jump(_wall_normal)
+		elif _try_wallrun_mantle():
+			_update_camera(delta)
+			return
+	elif _sliding:
+		_apply_gravity(delta)
+		_apply_slide(delta)
+		if _jump_buffer_timer > 0.0 and _coyote_timer > 0.0 and _has_headroom():
+			_end_slide() # スライディングジャンプ：速さはそのまま跳ぶ
+			_try_jump()
 	else:
 		_apply_gravity(delta)
 		_try_jump()
@@ -73,8 +141,11 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	if _wallrunning:
 		_check_wallrun_end()
-	else:
+	elif _sliding:
+		_check_slide_end()
+	elif not _try_ledge(before):
 		_try_start_wallrun(before)
+		_try_start_slide()
 	_update_camera(delta)
 	if global_position.y < RESPAWN_Y:
 		respawn()
@@ -88,6 +159,19 @@ func respawn() -> void:
 	_blocked_wall_normal = Vector3.ZERO
 	_wall_coyote_timer = 0.0
 	_trauma = 0.0
+	_ledge = Ledge.NONE
+	_push_timer = 0.0
+	_slide_buffer = 0.0
+	_glide_close = -INF
+	_glide_upgrade_until = -INF
+	_slide_on_land = false
+	if _sliding:
+		_end_slide()
+
+
+## 斬撃モード：RT / 右クリックを押している間。右スティックとマウスがアナログ斬りになる。
+func slash_mode() -> bool:
+	return input_enabled and Input.is_action_pressed("slash_mode")
 
 
 func horizontal_speed() -> float:
@@ -105,6 +189,48 @@ func trauma() -> float:
 
 func is_wall_running() -> bool:
 	return _wallrunning
+
+
+## 壁走り中の壁の法線（壁から離れる向き）。壁走りしていなければZERO。
+func wall_normal() -> Vector3:
+	return _wall_normal if _wallrunning else Vector3.ZERO
+
+
+func is_sliding() -> bool:
+	return _sliding
+
+
+## 乗り越え（"vault"）・よじ登り（"mantle"）の途中ならその名前。ほかは空。
+func ledge_kind() -> String:
+	match _ledge:
+		Ledge.VAULT:
+			return "vault"
+		Ledge.MANTLE:
+			return "mantle"
+	return ""
+
+
+## 左手の行き先。kind：vault / mantle（縁に手をつく）、wall（壁走り中の壁）、push（壁ジャンプで壁を押す）、
+## slide（床へ手を伸ばす）、空なら構えに戻す。point と normal はワールド座標（slideでは使わない）。
+func left_hand_target() -> Dictionary:
+	if _ledge != Ledge.NONE:
+		return {"kind": ledge_kind(), "point": _ledge_edge, "normal": Vector3.UP, "dir": _ledge_dir,
+			"progress": clampf(_ledge_t / maxf(_ledge_time, 0.001), 0.0, 1.0)}
+	if _wallrunning:
+		var eye := head.global_position
+		return {"kind": "wall", "point": eye - _wall_normal * (_body_radius + 0.02) + _wall_dir * 0.35 - Vector3.UP * 0.2,
+			"normal": _wall_normal, "dir": _wall_dir, "progress": 0.0}
+	if _push_timer > 0.0:
+		return {"kind": "push", "point": _push_point, "normal": _push_normal, "dir": Vector3.ZERO,
+			"progress": 1.0 - _push_timer / PUSH_TIME}
+	if _sliding:
+		return {"kind": "slide", "point": Vector3.ZERO, "normal": Vector3.UP, "dir": Vector3.ZERO, "progress": 0.0}
+	return {}
+
+
+## いまスーパーグライドの受付中か（縁を越え始めてから、登り切った少し後まで）
+func superglide_window() -> bool:
+	return _time >= _glide_open and _time <= _glide_close
 
 
 func wallrun_time_left() -> float:
@@ -133,8 +259,15 @@ func _update_timers(delta: float) -> void:
 	else:
 		_coyote_timer -= delta
 	_wall_coyote_timer -= delta
+	_push_timer -= delta
+	if input_enabled and Input.is_action_just_pressed("slide"):
+		_slide_buffer = SLIDE_BUFFER
+		_slide_at = _time
+	else:
+		_slide_buffer -= delta
 	if input_enabled and Input.is_action_just_pressed("jump"):
 		_jump_buffer_timer = Tuning.jump_buffer
+		_jump_at = _time
 	else:
 		_jump_buffer_timer -= delta
 
@@ -283,12 +416,276 @@ func _wall_jump(n: Vector3) -> void:
 		d = (side + n * maxf(d.dot(n), WALL_JUMP_MIN_OUT)).normalized()
 		out = d * out.length()
 	velocity = Vector3(out.x, Tuning.wall_jump_up, out.z)
+	_push_timer = PUSH_TIME
+	_push_normal = n
+	_push_point = head.global_position - n * (_body_radius + 0.02) - Vector3.UP * 0.15
 	_wallrunning = false
 	_blocked_wall_normal = n
 	_wall_coyote_timer = 0.0
 	_coyote_timer = 0.0
 	_jump_buffer_timer = 0.0
 	_rising_from_jump = true
+
+
+## スライディング：地上で最低速度以上なら、体を低くして滑る。始めに少し加速し、だんだん減速する。
+func _try_start_slide() -> void:
+	if is_on_floor() and velocity.y <= 0.0 and _slide_on_land:
+		_slide_on_land = false # スーパーグライドの着地は、押し直さなくても滑る
+		_slide_buffer = maxf(_slide_buffer, 0.001)
+	if _slide_buffer <= 0.0 or not is_on_floor() or horizontal_speed() < Tuning.slide_min_speed:
+		return
+	_slide_buffer = 0.0
+	_sliding = true
+	_slide_time = 0.0
+	# 加速は最高速度＋加速分までにとどめる（連打で無限に速くならない）。それより速ければ速さを保つ
+	var speed := horizontal_speed()
+	var boosted := maxf(speed, minf(speed + Tuning.slide_boost, Tuning.max_speed + Tuning.slide_boost))
+	var h := Vector2(velocity.x, velocity.z).normalized() * boosted
+	velocity.x = h.x
+	velocity.z = h.y
+	_set_body_height(SLIDE_HEIGHT)
+
+
+func _apply_slide(delta: float) -> void:
+	_slide_time += delta
+	var h := Vector2(velocity.x, velocity.z)
+	if is_on_floor():
+		# 下り坂では重力で加速し、上り坂では減速する
+		var n := get_floor_normal()
+		h += Vector2(n.x, n.z) * Tuning.gravity * Tuning.slide_slope_mult * delta
+	var speed := move_toward(h.length(), 0.0, Tuning.slide_friction * delta)
+	if not _has_headroom():
+		speed = maxf(speed, Tuning.slide_end_speed) # 低い天井の下では止まらずに抜ける
+	var dir := h.normalized() if h.length() > 0.01 else Vector2(-transform.basis.z.x, -transform.basis.z.z)
+	var input := _input_direction()
+	if input.length() > 0.1:
+		var want := Vector2(input.x, input.z).normalized()
+		if want.dot(dir) > -0.2: # 真後ろへ倒しても向きは変えない
+			dir = dir.move_toward(want, SLIDE_STEER * delta).normalized()
+	h = dir * speed
+	velocity.x = h.x
+	velocity.z = h.y
+
+
+func _check_slide_end() -> void:
+	if not _has_headroom():
+		return
+	if not is_on_floor() or horizontal_speed() < Tuning.slide_end_speed or _slide_time >= Tuning.slide_max_time:
+		_end_slide()
+
+
+func _end_slide() -> void:
+	_sliding = false
+	_set_body_height(STAND_HEIGHT)
+
+
+## 足の位置を変えずに体の高さを変える。
+func _set_body_height(height: float) -> void:
+	(_collision.shape as CapsuleShape3D).height = height
+	_collision.position.y = (height - STAND_HEIGHT) * 0.5
+
+
+## 立ち上がれるか（立った体の形が何にも当たらないか）。
+func _has_headroom() -> bool:
+	return not _overlaps_standing(global_position)
+
+
+func _overlaps_standing(center: Vector3) -> bool:
+	var shape := CapsuleShape3D.new()
+	shape.radius = _body_radius
+	shape.height = STAND_HEIGHT
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = shape
+	q.transform = Transform3D(Basis.IDENTITY, center)
+	q.collision_mask = collision_mask
+	q.exclude = [get_rid()]
+	return not get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty()
+
+
+## 乗り越え・よじ登り：前の壁に当たり、その上面が手の届く高さにあれば、左手をついて上へ移る。
+## 地上では低い段（乗り越え）だけ、空中では高い縁（よじ登り）まで。速さは落とさずに持ち出す。
+func _try_ledge(before: Vector3) -> bool:
+	var input := _input_direction()
+	var h := Vector3(before.x, 0.0, before.z)
+	var dir := Vector3.ZERO
+	if input.length() > 0.1:
+		dir = input.normalized()
+	elif not is_on_floor() and h.length() > 1.0:
+		dir = h.normalized() # 空中では勢いの向きでも縁をつかむ
+	if dir == Vector3.ZERO:
+		return false
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		var body := c.get_collider()
+		if body == null or not (int(body.get("collision_layer")) & WORLD_LAYER):
+			continue
+		var n := _flat_wall_normal(c.get_normal())
+		if n == Vector3.ZERO or -dir.dot(n) < cos(deg_to_rad(LEDGE_MAX_ANGLE)):
+			continue
+		var ledge := _probe_ledge(c.get_position(), n)
+		if ledge.is_empty():
+			continue
+		if is_on_floor() and ledge.height > Tuning.vault_max_height:
+			continue # 地上から高い縁へは跳ばないと届かない
+		_start_ledge(ledge, maxf(h.length(), horizontal_speed()))
+		return true
+	return false
+
+
+## 壁走り中にスティックを壁へ倒すと、手の届く高さの壁の上へよじ登る。
+func _try_wallrun_mantle() -> bool:
+	if _input_direction().dot(-_wall_normal) < LEDGE_WALLRUN_INTO:
+		return false
+	var ledge := _probe_ledge(global_position - _wall_normal * _body_radius, _wall_normal)
+	if ledge.is_empty():
+		return false
+	_wallrunning = false
+	_start_ledge(ledge, _wall_along)
+	return true
+
+
+## 壁の面上の点 contact（法線 n）から、上面の高さと立てる位置を探す。なければ空。
+func _probe_ledge(contact: Vector3, n: Vector3) -> Dictionary:
+	var feet := global_position.y - STAND_HEIGHT * 0.5
+	var top_y := feet + Tuning.mantle_max_height + 0.05
+	var space := get_world_3d().direct_space_state
+	# 手の届く高さより上まで壁が続いていたら縁はない
+	var high := Vector3(global_position.x, top_y, global_position.z)
+	var q := PhysicsRayQueryParameters3D.create(high, high - n * (_body_radius + LEDGE_PROBE_IN + 0.2), WORLD_LAYER)
+	q.exclude = [get_rid()]
+	if not space.intersect_ray(q).is_empty():
+		return {}
+	var probe := Vector3(contact.x, 0.0, contact.z) - n * LEDGE_PROBE_IN
+	q = PhysicsRayQueryParameters3D.create(Vector3(probe.x, top_y, probe.z), Vector3(probe.x, feet + LEDGE_MIN, probe.z), WORLD_LAYER)
+	q.exclude = [get_rid()]
+	var hit := space.intersect_ray(q)
+	if hit.is_empty() or hit.normal.y < 0.7:
+		return {}
+	var top: float = hit.position.y
+	var target := Vector3(probe.x, top + STAND_HEIGHT * 0.5 + 0.05, probe.z)
+	if _overlaps_standing(target):
+		return {} # 上に立つ場所がない
+	return {"height": top - feet, "target": target, "edge": Vector3(contact.x, top, contact.z), "dir": -n}
+
+
+func _start_ledge(ledge: Dictionary, speed: float) -> void:
+	if _sliding:
+		_end_slide()
+	_ledge = Ledge.VAULT if ledge.height <= Tuning.vault_max_height else Ledge.MANTLE
+	_ledge_time = Tuning.vault_time if _ledge == Ledge.VAULT else Tuning.mantle_time
+	_ledge_t = 0.0
+	_ledge_from = global_position
+	_ledge_to = ledge.target
+	_ledge_dir = ledge.dir
+	# 左手は縁の、体の中心より少し左につく
+	_ledge_edge = ledge.edge + _ledge_dir.cross(Vector3.UP) * -0.12
+	var exit_speed := maxf(speed, LEDGE_EXIT_MIN)
+	_ledge_exit = _ledge_dir * exit_speed
+	velocity = Vector3.ZERO
+	_rising_from_jump = false
+	_jump_buffer_timer = 0.0
+	_slide_on_land = false
+	if _ledge == Ledge.MANTLE:
+		_glide_open = _time + _ledge_time * GLIDE_OPEN
+		_glide_close = _time + _ledge_time + Tuning.superglide_grace
+		_glide_upgrade_until = -INF
+		_glide_reported = false
+
+
+# ---------------------------------------------------------------- スーパーグライド
+
+## よじ登りで縁を越える間（と登り切った少し後）に、ジャンプとしゃがみをほぼ同時に押す。
+## どちらが先でもよく、間がsuperglide_gap以内なら成功。ジャンプだけなら普通に跳ぶ（登り切ってから跳ぶ）。
+func _handle_glide_inputs() -> void:
+	if not input_enabled:
+		return
+	var jumped := _jump_at == _time
+	var slid := _slide_at == _time
+	if not (jumped or slid):
+		_report_glide_miss()
+		return
+	if jumped and _ledge == Ledge.MANTLE and _time < _glide_open:
+		_jump_buffer_timer = 0.0
+		_report_glide("早すぎ：縁を越え始めるまで %d ms 待つ" % _ms(_glide_open - _time), false)
+		return
+	if slid and _time <= _glide_upgrade_until:
+		_superglide(_time - _jump_at)
+	elif jumped and superglide_window():
+		var gap := _time - _slide_at
+		if gap <= Tuning.superglide_gap:
+			_superglide(gap)
+		else:
+			# 普通のジャンプ（よじ登り中なら登り切った瞬間に跳ぶ）。少しの間はしゃがめばスーパーグライドに変わる
+			_glide_upgrade_until = _time + Tuning.superglide_gap
+			_glide_close = minf(_glide_close, _time + Tuning.superglide_gap)
+			if _ledge != Ledge.NONE:
+				_jump_buffer_timer = maxf(_jump_buffer_timer, _ledge_time - _ledge_t + 0.05)
+			if gap <= GLIDE_HINT_TIME:
+				_report_glide("しゃがみが %d ms 早い（%d ms以内）" % [_ms(gap), _ms(Tuning.superglide_gap)], false)
+	elif slid and _time - _jump_at <= GLIDE_HINT_TIME and _jump_at >= _glide_open and _jump_at <= _glide_close:
+		_report_glide("しゃがみが %d ms 遅い（%d ms以内）" % [_ms(_time - _jump_at), _ms(Tuning.superglide_gap)], false)
+
+
+## 受付を過ぎたあと少し遅れて押していたら「遅すぎ」と出す
+func _report_glide_miss() -> void:
+	if _glide_reported or _time <= _glide_close:
+		return
+	var late := maxf(_jump_at, _slide_at) - _glide_close
+	if late > 0.0 and late <= GLIDE_HINT_TIME:
+		_report_glide("遅すぎ：登り切ってから %d ms 以内" % _ms(Tuning.superglide_grace), false)
+	elif _time - _glide_close > GLIDE_HINT_TIME:
+		_glide_reported = true
+
+
+func _superglide(gap: float) -> void:
+	var dir := _input_direction()
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length() > 0.1 else _ledge_dir
+	var speed := maxf(Tuning.superglide_speed, horizontal_speed())
+	if _ledge != Ledge.NONE:
+		# 縁を越えきる前でも、体は縁より上にある。立つ位置の高さまで上げてから飛ぶ
+		global_position.y = maxf(global_position.y, _ledge_to.y)
+		_ledge = Ledge.NONE
+	if _sliding:
+		_end_slide()
+	velocity = Vector3(dir.x * speed, Tuning.superglide_up, dir.z * speed)
+	_glide_close = minf(_glide_close, _time - 0.001) # このフレームから受付を閉じる
+	_glide_upgrade_until = -INF
+	_jump_buffer_timer = 0.0
+	_slide_buffer = 0.0
+	_coyote_timer = 0.0
+	_rising_from_jump = false
+	_blocked_wall_normal = Vector3.ZERO
+	_slide_on_land = true
+	_report_glide("スーパーグライド！（間 %d ms）" % _ms(absf(gap)), true)
+	HitFeel.on_superglide()
+
+
+func _report_glide(text: String, success: bool) -> void:
+	_glide_reported = true
+	move_tech.emit(text, success)
+
+
+func _ms(seconds: float) -> int:
+	return roundi(seconds * 1000.0)
+
+
+## 先に上がり、上がりきる頃に前へ出る。縁の角を体が通り抜けないようにする。
+func _apply_ledge(delta: float) -> void:
+	_ledge_t += delta
+	var x := clampf(_ledge_t / maxf(_ledge_time, 0.001), 0.0, 1.0)
+	var up := 1.0 - pow(1.0 - minf(1.0, x / 0.6), 2.0)
+	var fwd := smoothstep(0.35, 1.0, x)
+	global_position = Vector3(
+		lerpf(_ledge_from.x, _ledge_to.x, fwd),
+		lerpf(_ledge_from.y, _ledge_to.y, up),
+		lerpf(_ledge_from.z, _ledge_to.z, fwd))
+	if x >= 1.0:
+		_ledge = Ledge.NONE
+		velocity = _ledge_exit
+		_blocked_wall_normal = Vector3.ZERO
+		_coyote_timer = Tuning.coyote_time # 上がった直後に跳べる
+		move_and_slide()
 
 
 ## 進行方向の左右にある壁の法線（水平・単位ベクトル）。なければZERO。
@@ -341,7 +738,9 @@ func _update_camera(delta: float) -> void:
 	camera.fov = Tuning.fov
 	var speed := horizontal_speed()
 	var bob_y := 0.0
-	if is_on_floor() and speed > 0.5 and Tuning.head_bob > 0.0:
+	_eye = lerpf(_eye, EYE_SLIDE if _sliding else EYE_STAND, minf(1.0, 14.0 * delta))
+	head.position.y = _eye
+	if is_on_floor() and speed > 0.5 and Tuning.head_bob > 0.0 and not _sliding and _ledge == Ledge.NONE:
 		_bob_phase += speed * BOB_FREQ * delta
 		bob_y = sin(_bob_phase) * Tuning.head_bob
 	camera.position.y = lerpf(camera.position.y, bob_y, minf(1.0, 15.0 * delta))

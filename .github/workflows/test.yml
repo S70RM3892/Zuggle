@@ -1,0 +1,22 @@
+# pushとプルリクエストのたびに lint と自動テストを回す。手元では tools/dev.sh check と同じ。
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Godotのキャッシュ
+        uses: actions/cache@v5
+        with:
+          path: ~/godot
+          key: godot-4.6.1-linux
+
+      - name: lintとテスト
+        run: tools/dev.sh check

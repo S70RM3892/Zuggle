@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ \"$CLAUDE_CODE_REMOTE\" = \"true\" ] || exit 0; cd \"$CLAUDE_PROJECT_DIR\" && tools/dev.sh setup > /dev/null && \"$HOME/godot/godot\" --headless --path . --import > /dev/null 2>&1; echo 'Godot 4.6.1: ~/godot/godot（tools/dev.sh check で lint と全テスト）'",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(tools/dev.sh:*)",
+      "Bash(~/godot/godot --headless:*)"
+    ]
+  }
+}
