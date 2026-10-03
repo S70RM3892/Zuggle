@@ -2,9 +2,9 @@
 # 開発用のまとめコマンド。
 #
 #   tools/dev.sh setup            Godot 4.6.1（ヘッドレスで動く本体）を ~/godot に入れる。入っていれば何もしない
-#   tools/dev.sh test [名前...]   インポートしてからテストを並列で回す。名前は movement / wallrun / hitlab / slash（省略で全部）
+#   tools/dev.sh test [名前...]   インポートしてからテストを並列で回す。名前は movement / wallrun / hitlab / slash / parkour（省略で全部）
 #   tools/dev.sh check            setup → スクリプトの読み込みエラー確認 → 全テスト。push前はこれ
-#   tools/dev.sh shot [mode]      画面を撮って build/shots/ に置く（mode：views / swing / compass / all）。xvfb-runが要る
+#   tools/dev.sh shot [mode]      画面を撮って build/shots/ に置く（mode：views / swing / parkour / compass / all）。xvfb-runが要る
 #   tools/dev.sh bump [名前]      export_presets.cfg の version/code を1つ上げる。名前を渡せば version/name も変える
 #
 # GODOT を指定すればその実行ファイルを使う。失敗があれば終了コード1。
@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 GODOT_VERSION=4.6.1
 GODOT="${GODOT:-$(command -v godot || echo "$HOME/godot/godot")}"
-TESTS=(movement wallrun hitlab slash)
+TESTS=(movement wallrun hitlab slash parkour)
 
 setup() {
 	if [ -x "$GODOT" ] && "$GODOT" --version 2>/dev/null | grep -q "^${GODOT_VERSION}\.stable"; then

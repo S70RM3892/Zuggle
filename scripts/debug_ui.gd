@@ -32,6 +32,10 @@ func _process(_delta: float) -> void:
 		_speed_label.text = "水平速度 %.2f m/s" % _player.horizontal_speed()
 		if _player.is_wall_running():
 			_speed_label.text += "　壁走り中（残り %.2f 秒）" % _player.wallrun_time_left()
+		if _player.is_sliding():
+			_speed_label.text += "　スライディング中"
+		if _player.ledge_kind() != "":
+			_speed_label.text += "　%s" % ("乗り越え中" if _player.ledge_kind() == "vault" else "よじ登り中")
 		if HitFeel.last_power > 0.0:
 			_speed_label.text += "　直前のヒットの威力 %.2f" % HitFeel.last_power
 

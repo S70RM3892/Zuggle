@@ -30,6 +30,16 @@ const SPECS := [
 	["wallrun_turn_accel", "壁走りの折り返しの速さ (m/s²)", 5.0, 200.0, 1.0],
 	["wall_jump_push", "壁ジャンプの離れる速さ (m/s)", 0.0, 15.0, 0.1],
 	["wall_jump_up", "壁ジャンプの上向き速度 (m/s)", 0.0, 15.0, 0.1],
+	["slide_min_speed", "スライディングに入る最低速度 (m/s)", 0.0, 15.0, 0.1],
+	["slide_boost", "スライディング開始時の加速 (m/s)", 0.0, 6.0, 0.1],
+	["slide_friction", "スライディングの減速 (m/s²)", 0.0, 30.0, 0.5],
+	["slide_end_speed", "スライディングが終わる速さ (m/s)", 0.5, 10.0, 0.1],
+	["slide_max_time", "スライディングの上限時間 (秒)", 0.2, 3.0, 0.05],
+	["slide_slope_mult", "スライディングの坂での加速の倍率", 0.0, 3.0, 0.05],
+	["vault_max_height", "乗り越えの高さの上限（足から, m）", 0.3, 2.0, 0.05],
+	["vault_time", "乗り越えの時間 (秒)", 0.05, 0.6, 0.01],
+	["mantle_max_height", "よじ登れる高さの上限（足から, m）", 1.0, 3.5, 0.05],
+	["mantle_time", "よじ登りの時間 (秒)", 0.1, 1.0, 0.01],
 	["attack_buffer", "攻撃の先行入力 (秒)", 0.0, 0.3, 0.01],
 	["attack_windup", "攻撃の振りかぶり (秒)", 0.0, 0.3, 0.01],
 	["attack_active", "攻撃の判定時間 (秒)", 0.02, 0.3, 0.01],
@@ -84,6 +94,16 @@ var wallrun_tilt := 6.0 # 一人称では酔いに直結するので控えめ
 var wallrun_turn_accel := 40.0 # 8 m/sなら約0.4秒で折り返す
 var wall_jump_push := 5.0
 var wall_jump_up := 6.0
+var slide_min_speed := 5.0 # 歩きでは出ない。走っていれば出る
+var slide_boost := 1.5
+var slide_friction := 5.0 # 8 m/s から約1秒で3 m/s
+var slide_end_speed := 3.0
+var slide_max_time := 1.2
+var slide_slope_mult := 2.0 # 摩擦（5 m/s²）を上回り、16度の下り坂で約4 m/s²加速する
+var vault_max_height := 1.25 # 腰の高さまでは手をついて跳び越える
+var vault_time := 0.22
+var mantle_max_height := 2.3 # 目の高さ1.65m＋腕の長さ
+var mantle_time := 0.42
 var attack_buffer := 0.12
 var attack_windup := 0.05
 var attack_active := 0.10

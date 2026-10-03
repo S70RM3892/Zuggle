@@ -2,6 +2,7 @@ extends Node
 ## 見た目を確かめるためのスクリーンショット。ウィンドウが要るので xvfb-run で動かす（tools/dev.sh shot）。
 ##   views：決めた位置から部屋を撮る → build/shots/view_*.png
 ##   swing：攻撃とナイフ回しを一定間隔で撮る → build/shots/swing_*.png, inspect_*.png
+##   parkour：乗り越え・よじ登り・壁走り・スライディングの左手を撮る → build/shots/pk_*.png
 
 const OUT := "res://build/shots"
 const VIEWS := [
@@ -12,6 +13,11 @@ const VIEWS := [
 	["gaps", Vector3(10, 1.9, 4), 0.0, -8.0],
 	["overview", Vector3(22, 9.0, 22), 45.0, -22.0],
 	["corner", Vector3(-14, 1.65, -14), 45.0, 2.0],
+	["city", Vector3(-8, 34.0, 62), 0.0, -30.0],
+	["alley", Vector3(0, -5.1, -50), 0.0, 10.0],
+	["edge_n", Vector3(-10, 0.9, -27), 0.0, 0.0],
+	["slide_course", Vector3(-54, 4.4, -12), 180.0, -12.0],
+	["west", Vector3(-27, 0.9, 15.5), 90.0, -5.0],
 ]
 const COMPASS := [0.0, 90.0, 180.0, 270.0]
 const SWING_FRAMES := 12
@@ -79,6 +85,8 @@ func _run() -> void:
 		w.call("_start_inspect")
 		await _steps(w, "inspect", 16, Weapon.INSPECT_TIME / 15.0)
 		w.set_physics_process(true)
+	if mode == "parkour" or mode == "all":
+		await _parkour()
 	if mode == "swing" or mode == "all":
 		# 描画が遅くても動きを等間隔に撮れるよう、武器の時間を手で進める
 		await _place(Vector3(-5, 0.9, 5.6), 0.0, -3.0)
@@ -92,6 +100,53 @@ func _run() -> void:
 		await _steps(weapon, "inspect", 16, Weapon.INSPECT_TIME / 15.0)
 		weapon.set_physics_process(true)
 	get_tree().quit()
+
+
+## 実際に入力を入れて動かしながら撮る。描画が遅くても動きが飛ばないよう、時間をゆっくり進める。
+func _parkour() -> void:
+	_player.input_enabled = true
+	Engine.time_scale = 0.1
+	# 乗り越え：W_Bottom の柵へ -X に走る
+	await _place(Vector3(-36, 0.9, 16), 90.0, -8.0)
+	Input.action_press("move_forward")
+	await _shoot("pk_vault", 0.5, 8, 0.03)
+	Input.action_release("move_forward")
+	# よじ登り：N_Right の小屋へ跳ぶ
+	await _place(Vector3(15, -1.1, -42.5), 0.0, 0.0)
+	Input.action_press("move_forward")
+	await _game_wait(0.15)
+	Input.action_press("jump")
+	await _shoot("pk_mantle", 0.02, 8, 0.06)
+	Input.action_release("jump")
+	Input.action_release("move_forward")
+	# 壁走り：左の壁（RunWall の裏）
+	await _place(Vector3(-10, 3, 18.9), -90.0, 0.0)
+	_player.velocity = Vector3(8, 0, 0)
+	await _shoot("pk_wall", 0.25, 4, 0.08)
+	# スライディング
+	await _place(Vector3(0, 0.9, 8), 0.0, 0.0)
+	Input.action_press("move_forward")
+	await _game_wait(0.5)
+	Input.action_press("slide")
+	await _shoot("pk_slide", 0.1, 4, 0.12)
+	Input.action_release("slide")
+	Input.action_release("move_forward")
+	Engine.time_scale = 1.0
+	_player.input_enabled = false
+
+
+func _shoot(name: String, delay: float, count: int, step: float) -> void:
+	await _game_wait(delay)
+	for i in count:
+		await _save("%s_%02d" % [name, i])
+		await _game_wait(step)
+
+
+## ゲームの時間で sec 秒待つ。time_scale を下げると物理の1コマの時間も縮むので、その分コマを多く待つ。
+func _game_wait(sec: float) -> void:
+	var end := Engine.get_physics_frames() + int(round(sec * Engine.physics_ticks_per_second / Engine.time_scale))
+	while Engine.get_physics_frames() < end:
+		await get_tree().process_frame
 
 
 func _place(pos: Vector3, yaw: float, pitch: float) -> void:

@@ -13,6 +13,8 @@
 [ext_resource type="Material" path="res://materials/runwall.tres" id="12_runwall"]
 [ext_resource type="PackedScene" path="res://models/dummy.glb" id="13_dummy_model"]
 [ext_resource type="Script" path="res://scripts/slash_hud.gd" id="14_slash_hud"]
+[ext_resource type="Script" path="res://scripts/left_hand.gd" id="15_left_hand"]
+[ext_resource type="Script" path="res://scripts/city.gd" id="16_city"]
 
 [sub_resource type="PanoramaSkyMaterial" id="sky_mat"]
 panorama = ExtResource("8_sky")
@@ -43,12 +45,6 @@ fog_sky_affect = 0.0
 adjustment_enabled = true
 adjustment_contrast = 1.08
 adjustment_saturation = 1.1
-
-[sub_resource type="BoxShape3D" id="bound_ns"]
-size = Vector3(62, 16, 1)
-
-[sub_resource type="BoxShape3D" id="bound_ew"]
-size = Vector3(1, 16, 60)
 
 [sub_resource type="BoxShape3D" id="dummy_shape"]
 size = Vector3(1.7, 1.8, 1.2)
@@ -93,60 +89,32 @@ directional_shadow_max_distance = 60.0
 script = ExtResource("7_arena")
 
 [node name="Floor" type="CSGBox3D" parent="Room"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -3, 0)
 use_collision = true
-size = Vector3(60, 1, 60)
+size = Vector3(62, 6, 62)
 material = ExtResource("9_floor")
 
-[node name="WallNorth" type="StaticBody3D" parent="Room"]
-collision_layer = 4
-collision_mask = 0
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8, -30.5)
-
-[node name="Collision" type="CollisionShape3D" parent="Room/WallNorth"]
-shape = SubResource("bound_ns")
-
-[node name="Parapet" type="CSGBox3D" parent="Room/WallNorth" groups=["edge"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7.4, 0)
+[node name="ParapetNorth" type="CSGBox3D" parent="Room" groups=["edge"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, -30.5)
+use_collision = true
 size = Vector3(62, 1.2, 1)
 material = ExtResource("10_wall")
 
-[node name="WallSouth" type="StaticBody3D" parent="Room"]
-collision_layer = 4
-collision_mask = 0
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8, 30.5)
-
-[node name="Collision" type="CollisionShape3D" parent="Room/WallSouth"]
-shape = SubResource("bound_ns")
-
-[node name="Parapet" type="CSGBox3D" parent="Room/WallSouth" groups=["edge"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7.4, 0)
+[node name="ParapetSouth" type="CSGBox3D" parent="Room" groups=["edge"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 30.5)
+use_collision = true
 size = Vector3(62, 1.2, 1)
 material = ExtResource("10_wall")
 
-[node name="WallEast" type="StaticBody3D" parent="Room"]
-collision_layer = 4
-collision_mask = 0
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30.5, 8, 0)
-
-[node name="Collision" type="CollisionShape3D" parent="Room/WallEast"]
-shape = SubResource("bound_ew")
-
-[node name="Parapet" type="CSGBox3D" parent="Room/WallEast" groups=["edge"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7.4, 0)
+[node name="ParapetEast" type="CSGBox3D" parent="Room" groups=["edge"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30.5, 0.6, 0)
+use_collision = true
 size = Vector3(1, 1.2, 60)
 material = ExtResource("10_wall")
 
-[node name="WallWest" type="StaticBody3D" parent="Room"]
-collision_layer = 4
-collision_mask = 0
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30.5, 8, 0)
-
-[node name="Collision" type="CollisionShape3D" parent="Room/WallWest"]
-shape = SubResource("bound_ew")
-
-[node name="Parapet" type="CSGBox3D" parent="Room/WallWest" groups=["edge"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7.4, 0)
+[node name="ParapetWest" type="CSGBox3D" parent="Room" groups=["edge"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30.5, 0.6, 0)
+use_collision = true
 size = Vector3(1, 1.2, 60)
 material = ExtResource("10_wall")
 
@@ -224,6 +192,9 @@ use_collision = true
 size = Vector3(9, 1, 2.5)
 material = ExtResource("11_block")
 
+[node name="City" type="Node3D" parent="."]
+script = ExtResource("16_city")
+
 [node name="Player" type="CharacterBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 8)
 collision_mask = 7
@@ -277,6 +248,14 @@ mesh = SubResource("guard_mesh")
 [node name="Blade" type="MeshInstance3D" parent="Player/Head/Camera3D/Hand/Swing/Grip/BoxSword"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.55)
 mesh = SubResource("blade_mesh")
+
+[node name="LeftHand" type="Node3D" parent="Player/Head/Camera3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.32, -0.85, -0.2)
+visible = false
+script = ExtResource("15_left_hand")
+
+[node name="Model" parent="Player/Head/Camera3D/LeftHand" instance=ExtResource("6_hand")]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 
 [node name="Dummy" type="StaticBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0, 4)

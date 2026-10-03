@@ -105,6 +105,13 @@ slash_mode={
 , Object(InputEventKey,"device":-1,"physical_keycode":4194325,"keycode":0,"unicode":0)
 ]
 }
+slide={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":4194326,"keycode":0,"unicode":0)
+, Object(InputEventKey,"device":-1,"physical_keycode":67,"keycode":0,"unicode":99)
+, Object(InputEventJoypadButton,"device":-1,"button_index":1,"pressure":0.0,"pressed":false)
+]
+}
 toggle_debug={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"device":-1,"physical_keycode":4194332,"keycode":0,"unicode":0)

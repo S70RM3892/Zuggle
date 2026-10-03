@@ -1,0 +1,14 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://materials/building.gdshader" id="1"]
+[ext_resource type="Texture2D" path="res://textures/env/wall_albedo.jpg" id="2"]
+[ext_resource type="Texture2D" path="res://textures/env/wall_arm.jpg" id="3"]
+[ext_resource type="Texture2D" path="res://textures/env/floor_albedo.jpg" id="4"]
+[ext_resource type="Texture2D" path="res://textures/env/floor_arm.jpg" id="5"]
+
+[resource]
+shader = ExtResource("1")
+shader_parameter/wall_albedo = ExtResource("2")
+shader_parameter/wall_arm = ExtResource("3")
+shader_parameter/roof_albedo = ExtResource("4")
+shader_parameter/roof_arm = ExtResource("5")
