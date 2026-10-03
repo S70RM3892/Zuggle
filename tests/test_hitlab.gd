@@ -1,7 +1,8 @@
 extends Node
-## M3のヒットラボを自動で確かめる。実行：
+## M3のヒットラボ（ナイフ。いまは保管中）を自動で確かめる。実行：
 ##   godot --headless --path . res://tests/test_hitlab.tscn
 ## 失敗があれば終了コード1で終わる。
+## ナイフは本編から外したので、main.tscn にナイフの手（scenes/knife_hand.tscn）とダミー（scenes/dummy.tscn）を足して確かめる。
 ## ダミーは(-5, 0, 4)。プレイヤーは回転0で前(-Z)を向く。
 
 var DT := 1.0 / Engine.physics_ticks_per_second
@@ -16,8 +17,11 @@ func _ready() -> void:
 	var scene: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(scene)
 	_player = scene.get_node("Player")
-	_dummy = scene.get_node("Dummy")
-	_weapon = scene.get_node("Player/Head/Camera3D/Hand")
+	_dummy = load("res://scenes/dummy.tscn").instantiate()
+	_dummy.position = Vector3(-5, 0, 4)
+	scene.add_child(_dummy)
+	_weapon = load("res://scenes/knife_hand.tscn").instantiate()
+	scene.get_node("Player/Head/Camera3D").add_child(_weapon)
 	_run.call_deferred()
 
 

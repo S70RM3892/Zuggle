@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Zuggle"
-config/description="パルクール斬撃アクション"
+config/description="一人称パルクール"
 run/main_scene="res://scenes/main.tscn"
 config/quit_on_go_back=false
 config/icon="res://icon.svg"
@@ -87,8 +87,7 @@ jump={
 }
 attack={
 "deadzone": 0.5,
-"events": [Object(InputEventMouseButton,"device":-1,"button_mask":0,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":1,"canceled":false,"pressed":false,"double_click":false)
-, Object(InputEventKey,"device":-1,"physical_keycode":74,"keycode":0,"unicode":106)
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":74,"keycode":0,"unicode":106)
 , Object(InputEventJoypadButton,"device":-1,"button_index":2,"pressure":0.0,"pressed":false)
 ]
 }
@@ -96,6 +95,27 @@ inspect={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"device":-1,"physical_keycode":70,"keycode":0,"unicode":102)
 , Object(InputEventJoypadButton,"device":-1,"button_index":3,"pressure":0.0,"pressed":false)
+]
+}
+crouch={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":67,"keycode":0,"unicode":99)
+, Object(InputEventKey,"device":-1,"physical_keycode":4194326,"keycode":0,"unicode":0)
+, Object(InputEventJoypadButton,"device":-1,"button_index":1,"pressure":0.0,"pressed":false)
+]
+}
+hand_left={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":81,"keycode":0,"unicode":113)
+, Object(InputEventMouseButton,"device":-1,"button_mask":0,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":2,"canceled":false,"pressed":false,"double_click":false)
+, Object(InputEventJoypadButton,"device":-1,"button_index":9,"pressure":0.0,"pressed":false)
+]
+}
+hand_right={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":69,"keycode":0,"unicode":101)
+, Object(InputEventMouseButton,"device":-1,"button_mask":0,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":1,"canceled":false,"pressed":false,"double_click":false)
+, Object(InputEventJoypadButton,"device":-1,"button_index":10,"pressure":0.0,"pressed":false)
 ]
 }
 toggle_debug={

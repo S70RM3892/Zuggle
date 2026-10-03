@@ -1,0 +1,40 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/dummy.gd" id="1_dummy"]
+
+[sub_resource type="StandardMaterial3D" id="mat_dummy"]
+albedo_color = Color(0.85, 0.3, 0.28, 1)
+roughness = 0.7
+
+[sub_resource type="CapsuleMesh" id="dummy_body_mesh"]
+material = SubResource("mat_dummy")
+radius = 0.35
+height = 1.4
+
+[sub_resource type="SphereMesh" id="dummy_head_mesh"]
+material = SubResource("mat_dummy")
+radius = 0.2
+height = 0.4
+
+[sub_resource type="CylinderShape3D" id="dummy_shape"]
+height = 1.8
+radius = 0.4
+
+[node name="Dummy" type="StaticBody3D"]
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("1_dummy")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("dummy_shape")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
+mesh = SubResource("dummy_body_mesh")
+
+[node name="Head" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.58, 0)
+mesh = SubResource("dummy_head_mesh")
