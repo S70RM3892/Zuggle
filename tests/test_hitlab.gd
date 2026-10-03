@@ -173,8 +173,8 @@ func _test_retract_near_wall() -> void:
 	print("壁へのめり込み")
 	_release_all()
 	_player.respawn()
-	# 北の壁（面はz=-30）の手前0.6m
-	_player.global_position = Vector3(0, 0.9, -29.4)
+	# 壁走り用の長い壁（南の面はz=18.5）の手前0.6m
+	_player.global_position = Vector3(0, 0.9, 19.1)
 	_player.rotation = Vector3.ZERO
 	await _frames(int(0.5 / DT))
 	_check(_weapon.retract_amount() > 0.2, "壁の前では武器を引っ込める (%.2f)" % _weapon.retract_amount())

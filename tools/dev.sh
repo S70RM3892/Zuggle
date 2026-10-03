@@ -4,6 +4,7 @@
 #   tools/dev.sh setup            Godot 4.6.1（ヘッドレスで動く本体）を ~/godot に入れる。入っていれば何もしない
 #   tools/dev.sh test [名前...]   インポートしてからテストを並列で回す。名前は movement / wallrun / hitlab（省略で全部）
 #   tools/dev.sh check            setup → スクリプトの読み込みエラー確認 → 全テスト。push前はこれ
+#   tools/dev.sh shot [mode]      画面を撮って build/shots/ に置く（mode：views / swing / compass / all）。xvfb-runが要る
 #   tools/dev.sh bump [名前]      export_presets.cfg の version/code を1つ上げる。名前を渡せば version/name も変える
 #
 # GODOT を指定すればその実行ファイルを使う。失敗があれば終了コード1。
@@ -70,6 +71,15 @@ run_tests() {
 	return $failed
 }
 
+## 仮想ディスプレイ上で実際に描画してスクリーンショットを撮り、並べた一覧（sheet_*.png）も作る。
+shot() {
+	rm -rf build/shots
+	xvfb-run -a -s "-screen 0 1280x720x24" timeout 300 "$GODOT" --path . --rendering-driver vulkan --rendering-method mobile \
+		--resolution 960x540 res://tools/shot/shot.tscn -- "--mode=${1:-views}" > build/shot.log 2>&1 || true
+	grep -E "SCRIPT ERROR|ERROR: .*res://" build/shot.log | head -20 || true
+	python3 tools/shot/sheet.py build/shots
+}
+
 bump() {
 	local code
 	code=$(sed -n 's/^version\/code=\([0-9]*\)$/\1/p' export_presets.cfg)
@@ -87,6 +97,7 @@ case "$cmd" in
 	test) setup; import; run_tests "$@" ;;
 	lint) setup; import; lint ;;
 	check) setup; import; lint; run_tests ;;
+	shot) setup; import; shot "$@" ;;
 	bump) bump "$@" ;;
-	*) sed -n '2,10p' "$0"; exit 2 ;;
+	*) sed -n '2,11p' "$0"; exit 2 ;;
 esac

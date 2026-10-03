@@ -2,15 +2,19 @@
 
 [ext_resource type="Script" path="res://scripts/player.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/debug_ui.gd" id="2_debug"]
-[ext_resource type="Texture2D" path="res://textures/grid.png" id="3_grid"]
 [ext_resource type="Script" path="res://scripts/weapon.gd" id="4_weapon"]
 [ext_resource type="Script" path="res://scripts/dummy.gd" id="5_dummy"]
 [ext_resource type="PackedScene" path="res://models/hand_rigged.scn" id="6_hand"]
+[ext_resource type="Script" path="res://scripts/arena.gd" id="7_arena"]
+[ext_resource type="Texture2D" path="res://textures/env/sky.jpg" id="8_sky"]
+[ext_resource type="Material" path="res://materials/floor.tres" id="9_floor"]
+[ext_resource type="Material" path="res://materials/wall.tres" id="10_wall"]
+[ext_resource type="Material" path="res://materials/block.tres" id="11_block"]
+[ext_resource type="Material" path="res://materials/runwall.tres" id="12_runwall"]
 
-[sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
-sky_top_color = Color(0.36, 0.52, 0.78, 1)
-sky_horizon_color = Color(0.72, 0.78, 0.86, 1)
-ground_horizon_color = Color(0.72, 0.78, 0.86, 1)
+[sub_resource type="PanoramaSkyMaterial" id="sky_mat"]
+panorama = ExtResource("8_sky")
+energy_multiplier = 1.0
 
 [sub_resource type="Sky" id="sky"]
 sky_material = SubResource("sky_mat")
@@ -19,31 +23,30 @@ sky_material = SubResource("sky_mat")
 background_mode = 2
 sky = SubResource("sky")
 ambient_light_source = 3
-tonemap_mode = 2
+ambient_light_energy = 0.7
+reflected_light_source = 2
+tonemap_mode = 3
+tonemap_exposure = 0.85
+tonemap_white = 6.0
+glow_enabled = true
+glow_intensity = 0.9
+glow_strength = 1.1
+glow_bloom = 0.05
+glow_blend_mode = 1
+glow_hdr_threshold = 1.2
+fog_enabled = true
+fog_light_color = Color(0.72, 0.6, 0.62, 1)
+fog_density = 0.004
+fog_sky_affect = 0.0
+adjustment_enabled = true
+adjustment_contrast = 1.08
+adjustment_saturation = 1.1
 
-[sub_resource type="StandardMaterial3D" id="mat_floor"]
-albedo_color = Color(0.78, 0.8, 0.84, 1)
-albedo_texture = ExtResource("3_grid")
-uv1_triplanar = true
-uv1_world_triplanar = true
-uv1_scale = Vector3(0.5, 0.5, 0.5)
-texture_filter = 5
+[sub_resource type="BoxShape3D" id="bound_ns"]
+size = Vector3(62, 16, 1)
 
-[sub_resource type="StandardMaterial3D" id="mat_wall"]
-albedo_color = Color(0.55, 0.62, 0.72, 1)
-albedo_texture = ExtResource("3_grid")
-uv1_triplanar = true
-uv1_world_triplanar = true
-uv1_scale = Vector3(0.5, 0.5, 0.5)
-texture_filter = 5
-
-[sub_resource type="StandardMaterial3D" id="mat_block"]
-albedo_color = Color(0.95, 0.55, 0.25, 1)
-albedo_texture = ExtResource("3_grid")
-uv1_triplanar = true
-uv1_world_triplanar = true
-uv1_scale = Vector3(0.5, 0.5, 0.5)
-texture_filter = 5
+[sub_resource type="BoxShape3D" id="bound_ew"]
+size = Vector3(1, 16, 60)
 
 [sub_resource type="StandardMaterial3D" id="mat_dummy"]
 albedo_color = Color(0.85, 0.3, 0.28, 1)
@@ -93,118 +96,150 @@ height = 1.8
 environment = SubResource("env")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.819152, 0, -0.573576, -0.469846, 0.573576, -0.67101, 0.32899, 0.819152, 0.469846, 0, 10, 0)
+transform = Transform3D(1, 0, 0, 0, 0.970296, -0.241922, 0, 0.241922, 0.970296, 0, 10, 0)
+light_color = Color(1, 0.72, 0.5, 1)
+light_energy = 1.6
 shadow_enabled = true
+directional_shadow_max_distance = 60.0
 
 [node name="Room" type="Node3D" parent="."]
+script = ExtResource("7_arena")
 
 [node name="Floor" type="CSGBox3D" parent="Room"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
 use_collision = true
 size = Vector3(60, 1, 60)
-material = SubResource("mat_floor")
+material = ExtResource("9_floor")
 
-[node name="WallNorth" type="CSGBox3D" parent="Room"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -30.5)
-use_collision = true
-size = Vector3(62, 8, 1)
-material = SubResource("mat_wall")
+[node name="WallNorth" type="StaticBody3D" parent="Room"]
+collision_layer = 4
+collision_mask = 0
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8, -30.5)
 
-[node name="WallSouth" type="CSGBox3D" parent="Room"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 30.5)
-use_collision = true
-size = Vector3(62, 8, 1)
-material = SubResource("mat_wall")
+[node name="Collision" type="CollisionShape3D" parent="Room/WallNorth"]
+shape = SubResource("bound_ns")
 
-[node name="WallEast" type="CSGBox3D" parent="Room"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30.5, 4, 0)
-use_collision = true
-size = Vector3(1, 8, 60)
-material = SubResource("mat_wall")
+[node name="Parapet" type="CSGBox3D" parent="Room/WallNorth" groups=["edge"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7.4, 0)
+size = Vector3(62, 1.2, 1)
+material = ExtResource("10_wall")
 
-[node name="WallWest" type="CSGBox3D" parent="Room"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30.5, 4, 0)
-use_collision = true
-size = Vector3(1, 8, 60)
-material = SubResource("mat_wall")
+[node name="WallSouth" type="StaticBody3D" parent="Room"]
+collision_layer = 4
+collision_mask = 0
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8, 30.5)
+
+[node name="Collision" type="CollisionShape3D" parent="Room/WallSouth"]
+shape = SubResource("bound_ns")
+
+[node name="Parapet" type="CSGBox3D" parent="Room/WallSouth" groups=["edge"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7.4, 0)
+size = Vector3(62, 1.2, 1)
+material = ExtResource("10_wall")
+
+[node name="WallEast" type="StaticBody3D" parent="Room"]
+collision_layer = 4
+collision_mask = 0
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30.5, 8, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Room/WallEast"]
+shape = SubResource("bound_ew")
+
+[node name="Parapet" type="CSGBox3D" parent="Room/WallEast" groups=["edge"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7.4, 0)
+size = Vector3(1, 1.2, 60)
+material = ExtResource("10_wall")
+
+[node name="WallWest" type="StaticBody3D" parent="Room"]
+collision_layer = 4
+collision_mask = 0
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30.5, 8, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Room/WallWest"]
+shape = SubResource("bound_ew")
+
+[node name="Parapet" type="CSGBox3D" parent="Room/WallWest" groups=["edge"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7.4, 0)
+size = Vector3(1, 1.2, 60)
+material = ExtResource("10_wall")
 
 [node name="Steps" type="Node3D" parent="Room"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 0, -8)
 
-[node name="Step050" type="CSGBox3D" parent="Room/Steps"]
+[node name="Step050" type="CSGBox3D" parent="Room/Steps" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.25, 0)
 use_collision = true
 size = Vector3(3, 0.5, 3)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
-[node name="Step100" type="CSGBox3D" parent="Room/Steps"]
+[node name="Step100" type="CSGBox3D" parent="Room/Steps" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -3)
 use_collision = true
 size = Vector3(3, 1, 3)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
-[node name="Step150" type="CSGBox3D" parent="Room/Steps"]
+[node name="Step150" type="CSGBox3D" parent="Room/Steps" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, -6)
 use_collision = true
 size = Vector3(3, 1.5, 3)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
-[node name="Step200" type="CSGBox3D" parent="Room/Steps"]
+[node name="Step200" type="CSGBox3D" parent="Room/Steps" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -9)
 use_collision = true
 size = Vector3(3, 2, 3)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
 [node name="Gaps" type="Node3D" parent="Room"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, -6)
 
-[node name="PlatformA" type="CSGBox3D" parent="Room/Gaps"]
+[node name="PlatformA" type="CSGBox3D" parent="Room/Gaps" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 6)
 use_collision = true
 size = Vector3(4, 1, 8)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
-[node name="PlatformB" type="CSGBox3D" parent="Room/Gaps"]
+[node name="PlatformB" type="CSGBox3D" parent="Room/Gaps" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -4)
 use_collision = true
 size = Vector3(4, 1, 8)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
-[node name="PlatformC" type="CSGBox3D" parent="Room/Gaps"]
+[node name="PlatformC" type="CSGBox3D" parent="Room/Gaps" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -15)
 use_collision = true
 size = Vector3(4, 1, 8)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
-[node name="RunWall" type="CSGBox3D" parent="Room"]
+[node name="RunWall" type="CSGBox3D" parent="Room" groups=["runwall"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 18)
 use_collision = true
 size = Vector3(24, 5, 1)
-material = SubResource("mat_wall")
+material = ExtResource("12_runwall")
 
-[node name="JumpWall" type="CSGBox3D" parent="Room"]
+[node name="JumpWall" type="CSGBox3D" parent="Room" groups=["runwall"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 23)
 use_collision = true
 size = Vector3(24, 5, 1)
-material = SubResource("mat_wall")
+material = ExtResource("12_runwall")
 
 [node name="WallrunCourse" type="Node3D" parent="Room"]
 
-[node name="StartPad" type="CSGBox3D" parent="Room/WallrunCourse"]
+[node name="StartPad" type="CSGBox3D" parent="Room/WallrunCourse" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7.5, 0.5, 16.25)
 use_collision = true
 size = Vector3(9, 1, 2.5)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
-[node name="EndPad" type="CSGBox3D" parent="Room/WallrunCourse"]
+[node name="EndPad" type="CSGBox3D" parent="Room/WallrunCourse" groups=["platform"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.5, 0.5, 16.25)
 use_collision = true
 size = Vector3(9, 1, 2.5)
-material = SubResource("mat_block")
+material = ExtResource("11_block")
 
 [node name="Player" type="CharacterBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 8)
-collision_mask = 3
+collision_mask = 7
 floor_snap_length = 0.3
 script = ExtResource("1_player")
 
