@@ -40,6 +40,11 @@ const SPECS := [
 	["vault_time", "乗り越えの時間 (秒)", 0.05, 0.6, 0.01],
 	["mantle_max_height", "よじ登れる高さの上限（足から, m）", 1.0, 3.5, 0.05],
 	["mantle_time", "よじ登りの時間 (秒)", 0.1, 1.0, 0.01],
+	["superglide_speed", "スーパーグライドの速さ (m/s)", 5.0, 20.0, 0.1],
+	["superglide_up", "スーパーグライドの上向き速度 (m/s)", 0.0, 8.0, 0.1],
+	["superglide_gap", "スーパーグライド ジャンプとしゃがみの間 (秒)", 0.0, 0.2, 0.005],
+	["superglide_grace", "スーパーグライド 登り切った後の受付 (秒)", 0.0, 0.3, 0.01],
+	["superglide_hint", "スーパーグライドの受付中に照準を緑にする (0でオフ)", 0.0, 1.0, 1.0],
 	["attack_buffer", "攻撃の先行入力 (秒)", 0.0, 0.3, 0.01],
 	["attack_windup", "攻撃の振りかぶり (秒)", 0.0, 0.3, 0.01],
 	["attack_active", "攻撃の判定時間 (秒)", 0.02, 0.3, 0.01],
@@ -104,6 +109,11 @@ var vault_max_height := 1.25 # 腰の高さまでは手をついて跳び越え�
 var vault_time := 0.22
 var mantle_max_height := 2.3 # 目の高さ1.65m＋腕の長さ
 var mantle_time := 0.42
+var superglide_speed := 10.9 # Apexは走り7.59 m/sに対して10.3 m/s（約1.36倍）。最高速度8 m/sの1.36倍
+var superglide_up := 3.5 # 低く速く飛ぶ
+var superglide_gap := 0.05 # Apexは2フレーム以内。パッドでAからBへ親指を転がして出せる幅にする
+var superglide_grace := 0.1
+var superglide_hint := 1.0 # 練習用。受付の長さを体で覚えたら0にする
 var attack_buffer := 0.12
 var attack_windup := 0.05
 var attack_active := 0.10

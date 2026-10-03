@@ -10,12 +10,14 @@ var last_power := 0.0
 var _stop_token := 0
 var _hit_player: AudioStreamPlayer
 var _swing_player: AudioStreamPlayer
+var _glide_player: AudioStreamPlayer
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_hit_player = _make_player(_synth_hit())
 	_swing_player = _make_player(_synth_swing())
+	_glide_player = _make_player(_synth_glide())
 
 
 ## 仕様の式：威力 = 基本威力 × (1 + 現在の速度 / 最高速度)。速度の比は0〜1に収める。
@@ -42,6 +44,15 @@ func on_hit(power: float, player: Node) -> void:
 
 func play_swing() -> void:
 	_play(_swing_player, -8.0)
+
+
+## スーパーグライドが決まった合図。音と軽い振動で、見なくても成功が分かるようにする
+func on_superglide() -> void:
+	_play(_glide_player, -4.0)
+	var s := Tuning.rumble_strength
+	if s > 0.0:
+		for device in Input.get_connected_joypads():
+			Input.start_joy_vibration(device, s * 0.6, 0.0, 0.08)
 
 
 ## 世界全体を止める。止めている間は物理も止まるので、現実の時間で戻す。
@@ -113,6 +124,22 @@ func _synth_swing() -> AudioStreamWAV:
 		var x := float(i) / n
 		smooth = lerpf(smooth, randf_range(-1.0, 1.0), 0.25) # ざっくり高域を落とす
 		samples[i] = smooth * sin(PI * x) * 0.6
+	return _to_wav(samples)
+
+
+## スーパーグライドの音：上がっていく音程のヒュッと、風のノイズ。
+func _synth_glide() -> AudioStreamWAV:
+	var n := int(SAMPLE_RATE * 0.25)
+	var samples := PackedFloat32Array()
+	samples.resize(n)
+	var phase := 0.0
+	var smooth := 0.0
+	for i in n:
+		var x := float(i) / n
+		phase += TAU * lerpf(300.0, 900.0, x * x) / SAMPLE_RATE
+		smooth = lerpf(smooth, randf_range(-1.0, 1.0), 0.35)
+		var env := sin(PI * minf(1.0, x * 1.5)) * (1.0 - x)
+		samples[i] = (sin(phase) * 0.35 + smooth * 0.5) * env
 	return _to_wav(samples)
 
 

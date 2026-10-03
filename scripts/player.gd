@@ -3,7 +3,11 @@ extends CharacterBody3D
 ## 一人称プレイヤー。M1：走り・ジャンプ・コヨーテタイム・先行入力。M2：壁走り（方向転換・壁ジャンプ）。M3：画面揺れ。
 ## M4：斬撃モード（RT / 右クリックを押している間）は、右スティックとマウスを視点ではなくアナログ斬りに使う。
 ## M5：スライディング（B / Ctrl / C）、左手での乗り越え・よじ登り（壁走り中に壁へ倒すと壁の上へ）。
+## スーパーグライド：よじ登りで縁を越える頃にジャンプとしゃがみ（スライディング）をほぼ同時に押すと、低く速く飛ぶ。
 ## 大原則：動作を切り替えても水平方向の速度を落とさない。
+
+## 動きの技の結果（スーパーグライドの成否と間の長さなど）。HUDが表示する
+signal move_tech(text: String, success: bool)
 
 const PITCH_LIMIT := deg_to_rad(89.0)
 const BOB_FREQ := 1.6 # 1mあたりの揺れの位相（ラジアン）
@@ -26,6 +30,8 @@ const LEDGE_MAX_ANGLE := 50.0 # 壁の正面からこの角度以内へ向かっ
 const LEDGE_WALLRUN_INTO := 0.5 # 壁走り中、スティックの壁へ向かう成分がこれ以上なら壁の上へよじ登る
 const LEDGE_EXIT_MIN := 3.0 # よじ登った後に前へ進む最低の速さ (m/s)
 const PUSH_TIME := 0.18 # 壁ジャンプで左手が壁を押している時間 (秒)
+const GLIDE_OPEN := 0.5 # よじ登りのうち、この割合から受付を開く（体が縁の高さまで上がり、前へ出始める頃）
+const GLIDE_HINT_TIME := 0.3 # これ以内のずれなら、スーパーグライドの失敗として何が悪かったかを出す
 
 enum Ledge { NONE, VAULT, MANTLE }
 
@@ -62,6 +68,15 @@ var _ledge_exit := Vector3.ZERO # 終わったときの速度
 var _ledge_edge := Vector3.ZERO # 左手をつく縁（ワールド座標）
 var _ledge_dir := Vector3.ZERO # 越える向き（水平・単位ベクトル）
 
+var _time := 0.0 # 物理の時計（ジャンプとしゃがみを押した時刻を比べる）
+var _jump_at := -INF
+var _slide_at := -INF
+var _glide_open := -INF # スーパーグライドの受付（縁を越え始めてから、登り切った少し後まで）
+var _glide_close := -INF
+var _glide_upgrade_until := -INF # 受付中にジャンプした直後。この時刻までにしゃがめばスーパーグライドになる
+var _glide_reported := true # 1回のよじ登りで結果を1度だけ出す
+var _slide_on_land := false # スーパーグライドの後。着地したらスライディングに入る
+
 var _push_timer := 0.0 # 壁ジャンプで壁を押した左手の残り時間
 var _push_point := Vector3.ZERO
 var _push_normal := Vector3.ZERO
@@ -96,7 +111,9 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if input_enabled and not slash_mode():
 		_process_stick_look(delta)
+	_time += delta
 	_update_timers(delta)
+	_handle_glide_inputs()
 	if _ledge != Ledge.NONE:
 		# 乗り越え・よじ登りの間は決めた道筋をなぞる（当たり判定は始める前に確かめてある）
 		_apply_ledge(delta)
@@ -145,6 +162,9 @@ func respawn() -> void:
 	_ledge = Ledge.NONE
 	_push_timer = 0.0
 	_slide_buffer = 0.0
+	_glide_close = -INF
+	_glide_upgrade_until = -INF
+	_slide_on_land = false
 	if _sliding:
 		_end_slide()
 
@@ -208,6 +228,11 @@ func left_hand_target() -> Dictionary:
 	return {}
 
 
+## いまスーパーグライドの受付中か（縁を越え始めてから、登り切った少し後まで）
+func superglide_window() -> bool:
+	return _time >= _glide_open and _time <= _glide_close
+
+
 func wallrun_time_left() -> float:
 	return maxf(0.0, Tuning.wallrun_max_time - _wallrun_time) if _wallrunning else 0.0
 
@@ -237,10 +262,12 @@ func _update_timers(delta: float) -> void:
 	_push_timer -= delta
 	if input_enabled and Input.is_action_just_pressed("slide"):
 		_slide_buffer = SLIDE_BUFFER
+		_slide_at = _time
 	else:
 		_slide_buffer -= delta
 	if input_enabled and Input.is_action_just_pressed("jump"):
 		_jump_buffer_timer = Tuning.jump_buffer
+		_jump_at = _time
 	else:
 		_jump_buffer_timer -= delta
 
@@ -402,6 +429,9 @@ func _wall_jump(n: Vector3) -> void:
 
 ## スライディング：地上で最低速度以上なら、体を低くして滑る。始めに少し加速し、だんだん減速する。
 func _try_start_slide() -> void:
+	if is_on_floor() and velocity.y <= 0.0 and _slide_on_land:
+		_slide_on_land = false # スーパーグライドの着地は、押し直さなくても滑る
+		_slide_buffer = maxf(_slide_buffer, 0.001)
 	if _slide_buffer <= 0.0 or not is_on_floor() or horizontal_speed() < Tuning.slide_min_speed:
 		return
 	_slide_buffer = 0.0
@@ -554,6 +584,90 @@ func _start_ledge(ledge: Dictionary, speed: float) -> void:
 	velocity = Vector3.ZERO
 	_rising_from_jump = false
 	_jump_buffer_timer = 0.0
+	_slide_on_land = false
+	if _ledge == Ledge.MANTLE:
+		_glide_open = _time + _ledge_time * GLIDE_OPEN
+		_glide_close = _time + _ledge_time + Tuning.superglide_grace
+		_glide_upgrade_until = -INF
+		_glide_reported = false
+
+
+# ---------------------------------------------------------------- スーパーグライド
+
+## よじ登りで縁を越える間（と登り切った少し後）に、ジャンプとしゃがみをほぼ同時に押す。
+## どちらが先でもよく、間がsuperglide_gap以内なら成功。ジャンプだけなら普通に跳ぶ（登り切ってから跳ぶ）。
+func _handle_glide_inputs() -> void:
+	if not input_enabled:
+		return
+	var jumped := _jump_at == _time
+	var slid := _slide_at == _time
+	if not (jumped or slid):
+		_report_glide_miss()
+		return
+	if jumped and _ledge == Ledge.MANTLE and _time < _glide_open:
+		_jump_buffer_timer = 0.0
+		_report_glide("早すぎ：縁を越え始めるまで %d ms 待つ" % _ms(_glide_open - _time), false)
+		return
+	if slid and _time <= _glide_upgrade_until:
+		_superglide(_time - _jump_at)
+	elif jumped and superglide_window():
+		var gap := _time - _slide_at
+		if gap <= Tuning.superglide_gap:
+			_superglide(gap)
+		else:
+			# 普通のジャンプ（よじ登り中なら登り切った瞬間に跳ぶ）。少しの間はしゃがめばスーパーグライドに変わる
+			_glide_upgrade_until = _time + Tuning.superglide_gap
+			_glide_close = minf(_glide_close, _time + Tuning.superglide_gap)
+			if _ledge != Ledge.NONE:
+				_jump_buffer_timer = maxf(_jump_buffer_timer, _ledge_time - _ledge_t + 0.05)
+			if gap <= GLIDE_HINT_TIME:
+				_report_glide("しゃがみが %d ms 早い（%d ms以内）" % [_ms(gap), _ms(Tuning.superglide_gap)], false)
+	elif slid and _time - _jump_at <= GLIDE_HINT_TIME and _jump_at >= _glide_open and _jump_at <= _glide_close:
+		_report_glide("しゃがみが %d ms 遅い（%d ms以内）" % [_ms(_time - _jump_at), _ms(Tuning.superglide_gap)], false)
+
+
+## 受付を過ぎたあと少し遅れて押していたら「遅すぎ」と出す
+func _report_glide_miss() -> void:
+	if _glide_reported or _time <= _glide_close:
+		return
+	var late := maxf(_jump_at, _slide_at) - _glide_close
+	if late > 0.0 and late <= GLIDE_HINT_TIME:
+		_report_glide("遅すぎ：登り切ってから %d ms 以内" % _ms(Tuning.superglide_grace), false)
+	elif _time - _glide_close > GLIDE_HINT_TIME:
+		_glide_reported = true
+
+
+func _superglide(gap: float) -> void:
+	var dir := _input_direction()
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length() > 0.1 else _ledge_dir
+	var speed := maxf(Tuning.superglide_speed, horizontal_speed())
+	if _ledge != Ledge.NONE:
+		# 縁を越えきる前でも、体は縁より上にある。立つ位置の高さまで上げてから飛ぶ
+		global_position.y = maxf(global_position.y, _ledge_to.y)
+		_ledge = Ledge.NONE
+	if _sliding:
+		_end_slide()
+	velocity = Vector3(dir.x * speed, Tuning.superglide_up, dir.z * speed)
+	_glide_close = minf(_glide_close, _time - 0.001) # このフレームから受付を閉じる
+	_glide_upgrade_until = -INF
+	_jump_buffer_timer = 0.0
+	_slide_buffer = 0.0
+	_coyote_timer = 0.0
+	_rising_from_jump = false
+	_blocked_wall_normal = Vector3.ZERO
+	_slide_on_land = true
+	_report_glide("スーパーグライド！（間 %d ms）" % _ms(absf(gap)), true)
+	HitFeel.on_superglide()
+
+
+func _report_glide(text: String, success: bool) -> void:
+	_glide_reported = true
+	move_tech.emit(text, success)
+
+
+func _ms(seconds: float) -> int:
+	return roundi(seconds * 1000.0)
 
 
 ## 先に上がり、上がりきる頃に前へ出る。縁の角を体が通り抜けないようにする。

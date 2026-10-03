@@ -8,20 +8,30 @@ extends Node3D
 
 enum State { IDLE, WINDUP, ACTIVE, RECOVERY, INSPECT }
 
-# 指の曲げ角（度）。各指は付け根・中・先の3関節。正で手のひら側へ曲がる
+# 指の曲げ角（度）。各指は付け根・中・先の3関節。正で手のひら側へ曲がる。値は tools/rig/solve_grip.tscn で求める
+# 中指〜小指：円柱を握ったときの実測（Ishii ら 2019、CTで直径10mmと60mm）を柄の太さ（人の手なら直径約30mm）で内挿
+# 人差し指：輪に通して付け根を90度曲げる
 const CURL_GRIP := {
-	"index": [80.0, 95.0, 55.0], "middle": [80.0, 95.0, 55.0], "ring": [82.0, 95.0, 55.0],
-	"pinky": [85.0, 95.0, 55.0], "thumb": [55.0, 60.0, 50.0],
+	"index": [90.0, 83.0, 43.1], "middle": [64.3, 82.6, 52.9], "ring": [61.8, 86.3, 45.4],
+	"pinky": [52.8, 69.4, 51.8], "thumb": [0.0, 40.0, 80.0],
 }
-# ナイフを回している間：人差し指は輪に通したまま、ほかの指を開いて刃の通り道を空ける
+# ナイフを回している間：人差し指は輪に通したまま（握りと同じ）。ほかの指は、ナイフを1周させても
+# どの向きでも刃が当たらない所へ逃がす（tools/rig/solve_grip.tscn で確かめた形）
 const CURL_SPIN := {
-	"index": [70.0, 90.0, 50.0], "middle": [15.0, 10.0, 5.0], "ring": [20.0, 10.0, 5.0],
-	"pinky": [25.0, 10.0, 5.0], "thumb": [5.0, 10.0, 10.0],
+	"index": [90.0, 83.0, 43.1], "middle": [-10.0, 10.0, 0.0], "ring": [-10.0, 0.0, 10.0],
+	"pinky": [0.0, 10.0, 0.0], "thumb": [0.0, 20.0, 20.0],
 }
-# 親指は曲げ（握り）を CURL_GRIP の代わりにここで持ち、付け根を人差し指の方へ寄せる角度（度。骨のZ軸まわり）も足す
-@export var thumb_grip := Vector3(80.0, 70.0, 60.0)
-@export var thumb_across := -45.0
-@export var thumb_across_spin := 0.0
+# 親指は曲げ（握り）を CURL_GRIP の代わりにここで持ち、付け根を横へ振る角度（骨のZ軸まわり）と
+# ひねる角度（骨のY軸まわり。親指の対立）も足す。握りでは人差し指の中節の上にかぶせる
+@export var thumb_grip := Vector3(0.0, 40.0, 80.0)
+@export var thumb_across := 0.0
+@export var thumb_across_spin := -30.0
+@export var thumb_twist := -60.0
+## ナイフの輪の穴の中心（Gripの座標）。輪を人差し指に通す位置とナイフ回しの軸。tools/rig/solve_grip で求める。
+## 0なら柄頭の側の頂点からおおまかに求める
+@export var ring_center := Vector3.ZERO
+## 輪の中心を人差し指の基節のどこに置くか（付け根の節0〜中の節1）。指が輪に食い込まない範囲で一番根元
+@export var ring_along := 0.65
 # ナイフ眺め（Y / F）：刃を見せる → 返して裏を見せる → 人差し指を軸に回す → 握り直して構えに戻る
 const INSPECT_TIME := 2.4
 const SPIN_TURNS := 2.0
@@ -61,7 +71,8 @@ const SQUASH_DAMPING := 18.0
 # 姿勢：rot＝肘（拳の後ろ ELBOW）を中心にした回転（度。x=刃先の上下、y=刃先の左右（正で左）、z=ひねり）、
 # pos＝拳の位置のずれ (m)。肘を中心に回すので、前腕は肘の方を向いたまま拳が弧を描く
 const ELBOW := Vector3(0.0, 0.0, 0.35)
-const IDLE_ROT := Vector3(15.0, 10.0, 0.0)
+# 構え：手のひらを少し返して刃の平らな面をカメラへ向け、反りが見えるようにする。刃先は照準の左下に置き、照準をふさがない
+const IDLE_ROT := Vector3(15.0, 20.0, 45.0)
 
 # 3連の型。振りかぶり → 中間（ここを通る弧）→ 振り終わり → 行き過ぎ の順に通る。
 # side：斬った向き（1で右から左、-1で左から右、0で正面）。ダミーを流す向きに使う
@@ -669,6 +680,7 @@ func _pose_fingers() -> void:
 			var q := Quaternion(Vector3.RIGHT, angle)
 			if finger == "thumb" and k == 0:
 				q = Quaternion(Vector3.BACK, deg_to_rad(lerpf(thumb_across, thumb_across_spin, _open))) * q
+				q = Quaternion(Vector3.UP, deg_to_rad(thumb_twist)) * q
 			_skeleton.set_bone_pose_rotation(idx, rest * q)
 
 
@@ -785,7 +797,7 @@ func _fit(model: Node3D) -> void:
 	var center := moved.get_center()
 	var offset := Vector3(-center.x, -center.y, grip_back - moved.end.z)
 	model.transform = Transform3D(b, offset) * model.transform
-	_spin_pivot = _find_ring_center(model)
+	_spin_pivot = ring_center if ring_center != Vector3.ZERO else _find_ring_center(model)
 	_blade_dir = _find_blade_dir(model)
 	_spin_axis = _blade_dir.cross(Vector3.BACK).normalized()
 
@@ -805,9 +817,11 @@ func _find_blade_dir(model: Node3D) -> Vector3:
 	return Vector3.UP if sum.length() < 0.0001 else Vector3(sum.x, sum.y, 0.0).normalized()
 
 
-## 握った指の形から、ナイフを持たせる位置と向きを決める。
-## 人差し指の付け根の節（index_1〜index_2の間）に輪を通し、中指〜小指が巻く空間に柄を通して、
-## 小指の側から刃を出す。刃は拳の前(-Z)へ曲がる向きにする。
+## 握った指の形から、ナイフを持たせる位置と向きを決める（カランビットの標準の握り＝逆手）。
+## - 人差し指の基節（index_1〜index_2）の上に輪の中心を置く（ring_along）。輪の穴の軸は人差し指の向きにそろえる
+## - 柄は、中指〜小指が曲がってできる「筒」の中心をなるべく通る向きにする。人差し指の付け根から
+##   小指側の手のひらの付け根へ斜めに渡る（握り込みの対角線）
+## - 刃は小指の側から出て、内側の弧を拳の前(-Z)へ向ける
 func _fit_to_hand() -> void:
 	if _skeleton == null or not using_model:
 		return
@@ -817,17 +831,27 @@ func _fit_to_hand() -> void:
 	var hand := to_swing * _skeleton.get_bone_global_pose(_skeleton.find_bone("hand"))
 	_wrist = hand.origin
 	_forearm = hand.basis.y.normalized()
-	var ring := (_joint(to_swing, "index_1") + _joint(to_swing, "index_2")) * 0.5
-	var down := (_finger_hollow(to_swing, "pinky") - ring).normalized() # 輪から刃の出る側へ
-	var fwd := Vector3.FORWARD - down * Vector3.FORWARD.dot(down)
-	if fwd.length() < 0.01:
+	var a := _joint(to_swing, "index_1")
+	var b := _joint(to_swing, "index_2")
+	var ring := a.lerp(b, ring_along)
+	var down := Vector3.ZERO # 輪から刃の出る側へ
+	for f in ["middle", "ring", "pinky"]:
+		down += _finger_hollow(to_swing, f) - ring
+	if down.length() < 0.001:
 		return
-	fwd = fwd.normalized()
-	# モデルの軸（柄の向き Z・刃の曲がる向き）を、手の軸（上向き・拳の前）に合わせる
-	var src := Basis(_blade_dir.cross(Vector3.BACK), _blade_dir, Vector3.BACK)
-	var dst := Basis(fwd.cross(-down), fwd, -down)
-	var b := dst * src.inverse()
-	_grip_rest = Transform3D(b, ring - b * _spin_pivot)
+	down = down.normalized()
+	var z := -down # Gripの+Z（柄頭の側）
+	var d := (a - b).normalized() # 輪の穴の軸。人差し指の向きを、柄と直交するように少し倒す
+	var x := (d - z * d.dot(z)).normalized()
+	var y := z.cross(x) # 刃の曲がる向き
+	if y.dot(Vector3.FORWARD) < 0.0:
+		x = -x
+		y = -y
+	# モデルの軸（輪の穴の向き・刃の曲がる向き・柄の向き Z）を、手の軸に合わせる
+	var src := Basis(_spin_axis, _blade_dir, Vector3.BACK)
+	var dst := Basis(x, y, z)
+	var rot := dst * src.inverse()
+	_grip_rest = Transform3D(rot, ring - rot * _spin_pivot)
 	grip.transform = _grip_rest
 
 
@@ -835,12 +859,17 @@ func _joint(to_swing: Transform3D, bone: String) -> Vector3:
 	return to_swing * _skeleton.get_bone_global_pose(_skeleton.find_bone(bone)).origin
 
 
-## 握った指が巻いてできる輪の中心。付け根・中・先の節と指先の平均。
+## 曲げた指（付け根・中・先の節と指先）が囲む多角形の重心。柄はここを通るとよい
 func _finger_hollow(to_swing: Transform3D, finger: String) -> Vector3:
-	var a := _joint(to_swing, finger + "_1")
-	var b := _joint(to_swing, finger + "_2")
-	var c := _joint(to_swing, finger + "_3")
-	return (a + b + c + c + (c - b) * 0.9) * 0.25
+	var p: Array[Vector3] = [_joint(to_swing, finger + "_1"), _joint(to_swing, finger + "_2"), _joint(to_swing, finger + "_3")]
+	p.append(p[2] + (p[2] - p[1]) * 0.9) # 指先
+	var sum := Vector3.ZERO
+	var area := 0.0
+	for i in [1, 2]:
+		var t := (p[i] - p[0]).cross(p[i + 1] - p[0]).length() * 0.5
+		sum += (p[0] + p[i] + p[i + 1]) / 3.0 * t
+		area += t
+	return sum / area if area > 0.0 else (p[0] + p[1] + p[2] + p[3]) * 0.25
 
 
 ## 柄頭の側（Gripの+Z端）にある輪の中心。柄頭から全長の1割の範囲の頂点の中心をとる。

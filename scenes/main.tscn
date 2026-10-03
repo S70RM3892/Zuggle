@@ -15,6 +15,7 @@
 [ext_resource type="Script" path="res://scripts/slash_hud.gd" id="14_slash_hud"]
 [ext_resource type="Script" path="res://scripts/left_hand.gd" id="15_left_hand"]
 [ext_resource type="Script" path="res://scripts/city.gd" id="16_city"]
+[ext_resource type="Script" path="res://scripts/hud.gd" id="17_hud"]
 
 [sub_resource type="PanoramaSkyMaterial" id="sky_mat"]
 panorama = ExtResource("8_sky")
@@ -227,6 +228,7 @@ flip_model = true
 model_length = 0.32
 grip_back = 0.09
 hit_length = 1.0
+ring_center = Vector3(-3e-05, 0.04006, 0.05659)
 
 [node name="Swing" type="Node3D" parent="Player/Head/Camera3D/Hand"]
 
@@ -273,6 +275,8 @@ shape = SubResource("dummy_shape")
 transform = Transform3D(1.015, 0, 0, 0, 1.015, 0, 0, 0, 1.015, 0, 0.901, 0)
 
 [node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("17_hud")
+player_path = NodePath("../Player")
 
 [node name="CenterDot" type="ColorRect" parent="HUD"]
 anchors_preset = 8

@@ -304,3 +304,14 @@ func _test_grip() -> void:
 	_check(tip.y < pinky.y, "刃先は小指より下へ出る")
 	var curve: Vector3 = rest.basis * _weapon._blade_dir
 	_check(curve.normalized().z < -0.7, "刃は拳の前へ曲がる (%.2f)" % curve.normalized().z)
+	# カランビットの標準の握り：人差し指が輪に通る
+	var i1: Vector3 = bone.call("index_1")
+	var i2: Vector3 = bone.call("index_2")
+	var t := clampf((ring - i1).dot(i2 - i1) / (i2 - i1).length_squared(), 0.0, 1.0)
+	var off := ring.distance_to(i1 + (i2 - i1) * t)
+	_check(off < 0.004, "輪の中心が人差し指の付け根の骨の上にある（ずれ %.1f mm）" % (off * 1000.0))
+	_check(t > 0.4 and t < 0.8, "輪は人差し指の根元寄り（付け根から %.0f%%）" % (t * 100.0))
+	var axis := (rest.basis * _weapon._spin_axis).normalized()
+	var tilt := rad_to_deg(axis.angle_to((i2 - i1).normalized()))
+	tilt = minf(tilt, 180.0 - tilt)
+	_check(tilt < 15.0, "輪の穴の軸が人差し指の向きにそろう（%.0f 度。穴と指のすき間で傾けられるのは約15度）" % tilt)
