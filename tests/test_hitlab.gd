@@ -33,6 +33,7 @@ func _run() -> void:
 	await _test_attack_cancels_inspect()
 	await _test_hand_rig()
 	await _test_combo()
+	await _test_grip()
 	print("\n%s" % ("ALL PASSED" if _failures == 0 else "%d FAILED" % _failures))
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -207,9 +208,12 @@ func _press(action: String) -> void:
 
 
 func _knife_angle() -> float:
-	# 柄の向き(Grip の Z)が Swing の中でどれだけ回っているか
+	# 柄の向き(Grip の Z)が、ナイフ回しの軸まわりに握った向きからどれだけ回っているか
 	var z := (_weapon.swing.global_transform.affine_inverse() * _weapon.grip.global_transform).basis.z.normalized()
-	return atan2(z.z, z.y)
+	var axis := _weapon.spin_axis()
+	var e1 := _weapon.grip_rest().basis.z.normalized()
+	var e2 := axis.cross(e1)
+	return atan2(z.dot(e2), z.dot(e1))
 
 
 func _test_inspect() -> void:
@@ -272,3 +276,20 @@ func _test_combo() -> void:
 	_check(_weapon.combo == 0, "間を空けると1の型に戻る (%d)" % _weapon.combo)
 	while _weapon.is_attacking():
 		await get_tree().physics_frame
+
+
+func _test_grip() -> void:
+	print("ナイフの握り")
+	await _stand(6.0)
+	var skel: Skeleton3D = _weapon.find_children("*", "Skeleton3D", true, false)[0]
+	var to_swing := _weapon.swing.global_transform.affine_inverse() * skel.global_transform
+	var bone := func(n: String) -> Vector3: return to_swing * skel.get_bone_global_pose(skel.find_bone(n)).origin
+	var rest := _weapon.grip_rest()
+	var ring: Vector3 = rest * _weapon._spin_pivot
+	var index_mid: Vector3 = (bone.call("index_1") + bone.call("index_2")) * 0.5
+	_check(ring.distance_to(index_mid) < 0.02, "輪は人差し指の付け根の節にかかる (%.3f m)" % ring.distance_to(index_mid))
+	var tip: Vector3 = rest * Vector3(0, 0, _weapon.grip_back - _weapon.model_length)
+	var pinky: Vector3 = bone.call("pinky_1")
+	_check(tip.y < pinky.y, "刃先は小指より下へ出る")
+	var curve: Vector3 = rest.basis * _weapon._blade_dir
+	_check(curve.normalized().z < -0.7, "刃は拳の前へ曲がる (%.2f)" % curve.normalized().z)

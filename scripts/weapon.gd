@@ -11,17 +11,34 @@ enum State { IDLE, WINDUP, ACTIVE, RECOVERY, INSPECT }
 # 指の曲げ角（度）。各指は付け根・中・先の3関節。正で手のひら側へ曲がる
 const CURL_GRIP := {
 	"index": [80.0, 95.0, 55.0], "middle": [80.0, 95.0, 55.0], "ring": [82.0, 95.0, 55.0],
-	"pinky": [85.0, 95.0, 55.0], "thumb": [25.0, 45.0, 40.0],
+	"pinky": [85.0, 95.0, 55.0], "thumb": [55.0, 60.0, 50.0],
 }
 # ナイフを回している間：人差し指は輪に通したまま、ほかの指を開いて刃の通り道を空ける
 const CURL_SPIN := {
 	"index": [70.0, 90.0, 50.0], "middle": [15.0, 10.0, 5.0], "ring": [20.0, 10.0, 5.0],
 	"pinky": [25.0, 10.0, 5.0], "thumb": [5.0, 10.0, 10.0],
 }
-const INSPECT_TIME := 1.0
+# 親指は曲げ（握り）を CURL_GRIP の代わりにここで持ち、付け根を人差し指の方へ寄せる角度（度。骨のZ軸まわり）も足す
+@export var thumb_grip := Vector3(80.0, 70.0, 60.0)
+@export var thumb_across := -45.0
+@export var thumb_across_spin := 0.0
+# ナイフ眺め（Y / F）：刃を見せる → 返して裏を見せる → 人差し指を軸に回す → 握り直して構えに戻る
+const INSPECT_TIME := 2.4
 const SPIN_TURNS := 2.0
-const INSPECT_ROT := Vector3(10.0, 14.0, 34.0) # 回す間は少し持ち上げ、ひねって見せる
-const INSPECT_POS := Vector3(-0.03, 0.04, -0.03)
+# 姿勢のキー：[時刻（INSPECT_TIMEに対する割合）, rot, pos, 手首の曲げ（度。x=内へ、y=上へ）]
+const INSPECT_KEYS := [
+	[0.14, Vector3(10.0, 6.0, 30.0), Vector3(-0.05, 0.05, -0.02), Vector3(70.0, 10.0, 0.0)], # 手首を内へ曲げ、刃の面をこちらへ向ける
+	[0.30, Vector3(14.0, 8.0, 15.0), Vector3(-0.05, 0.055, -0.03), Vector3(60.0, 20.0, 0.0)], # 少し傾けて眺める
+	[0.40, Vector3(10.0, 4.0, 140.0), Vector3(-0.05, 0.04, -0.02), Vector3(50.0, 0.0, 0.0)], # 手のひらを上へ返して裏の面
+	[0.48, Vector3(10.0, 8.0, 15.0), Vector3(-0.04, 0.04, -0.02), Vector3.ZERO], # 回す構え
+	[0.80, Vector3(9.0, 10.0, 20.0), Vector3(-0.04, 0.045, -0.02), Vector3.ZERO],
+	[0.86, Vector3(2.0, 8.0, 4.0), Vector3(-0.02, 0.0, -0.04), Vector3(-12.0, 0.0, 0.0)], # 握り直して手首を軽く振る
+	[1.0, IDLE_ROT, Vector3.ZERO, Vector3.ZERO],
+]
+const SPIN_FROM := 0.48 # 回し始め・終わり（割合）
+const SPIN_TO := 0.82
+const OPEN_FROM := 0.43 # 指を開き始め・閉じ終わり（割合）
+const OPEN_TO := 0.86
 
 const MODEL_PATH := "res://models/weapon.glb"
 const WEAPON_GLOW := preload("res://models/weapon_emission.png")
@@ -43,7 +60,7 @@ const IDLE_ROT := Vector3(15.0, 10.0, 0.0)
 # side：斬った向き（1で右から左、-1で左から右、0で正面）。ダミーを流す向きに使う
 const PATTERNS := [
 	{ # 1. 袈裟斬り：右上から左下へ
-		"windup": [Vector3(14.0, -28.0, -62.0), Vector3(0.02, 0.03, 0.05)],
+		"windup": [Vector3(14.0, -24.0, -62.0), Vector3(-0.03, 0.03, 0.05)],
 		"mid": [Vector3(4.0, 6.0, -80.0), Vector3(-0.02, 0.0, -0.12)],
 		"finish": [Vector3(-12.0, 40.0, -92.0), Vector3(-0.03, -0.02, -0.03)],
 		"follow": [Vector3(-16.0, 47.0, -96.0), Vector3(-0.04, -0.03, -0.01)],
@@ -106,6 +123,7 @@ var _from_rot := IDLE_ROT
 var _from_pos := Vector3.ZERO
 var _rot := IDLE_ROT # 今の姿勢
 var _pos := Vector3.ZERO
+var _bend := Vector3.ZERO # 手首の曲げ（度）。x=内へ、y=上へ
 var _settle_rot := Vector3.ZERO # 構えに戻るときの、ばねで揺れる残り
 var _settle_rot_vel := Vector3.ZERO
 var _settle_pos := Vector3.ZERO
@@ -129,6 +147,10 @@ var _base_position: Vector3
 var _player: Player
 var _grip_rest: Transform3D
 var _spin_pivot := Vector3.ZERO # ナイフを回す軸（輪の中心）。Gripの座標
+var _spin_axis := Vector3.RIGHT # ナイフを回す軸の向き（輪の穴の向き＝刃の面の法線）。Gripの座標
+var _blade_dir := Vector3.UP # 刃先が曲がっていく向き。Gripの座標
+var _wrist := Vector3.ZERO # 手首の位置と前腕の向き（ひねりの軸）。Swingの座標
+var _forearm := Vector3.FORWARD
 var _spin := 0.0 # ナイフの回転（ラジアン）
 var _open := 0.0 # 指の開き。0で握る、1でナイフ回しの形
 var _skeleton: Skeleton3D
@@ -151,6 +173,7 @@ func _ready() -> void:
 	var skels := find_children("*", "Skeleton3D", true, false)
 	if not skels.is_empty():
 		_skeleton = skels[0]
+	_fit_to_hand()
 	_make_trail()
 
 
@@ -186,6 +209,15 @@ func is_inspecting() -> bool:
 	return state == State.INSPECT
 
 
+## 握った状態のナイフ（Grip）の姿勢と、ナイフ回しの軸。どちらも Swing の座標。
+func grip_rest() -> Transform3D:
+	return _grip_rest
+
+
+func spin_axis() -> Vector3:
+	return (_grip_rest.basis * _spin_axis).normalized()
+
+
 ## 判定の箱のワールド座標での姿勢。握る位置から Swing の前(-Z)へ伸ばす。
 func hitbox_transform() -> Transform3D:
 	var g := swing.global_transform.orthonormalized()
@@ -209,6 +241,7 @@ func _start_swing() -> void:
 	_trail_points.clear()
 	_t = 0.0
 	_spin = 0.0 # 回している途中なら握り直してから振る
+	_bend = Vector3.ZERO
 	_open = 0.0
 	state = State.WINDUP
 
@@ -247,16 +280,32 @@ func _advance(delta: float) -> void:
 				_kick_settle(p)
 		State.INSPECT:
 			var x := _ratio(INSPECT_TIME)
-			# 指を開く(0〜0.15) → 回す(0.1〜0.8) → 握り直す(0.75〜1.0)
-			_open = smoothstep(0.0, 0.15, x) * (1.0 - smoothstep(0.75, 1.0, x))
-			_spin = TAU * SPIN_TURNS * smoothstep(0.1, 0.8, x)
-			var lift := sin(PI * x)
-			var back := minf(1.0, x * 4.0)
-			_set_pose(_from_rot.lerp(IDLE_ROT, back).lerp(INSPECT_ROT, lift), _from_pos.lerp(Vector3.ZERO, back).lerp(INSPECT_POS, lift))
+			_open = smoothstep(OPEN_FROM, OPEN_FROM + 0.05, x) * (1.0 - smoothstep(OPEN_TO - 0.04, OPEN_TO, x))
+			_spin = TAU * SPIN_TURNS * smoothstep(SPIN_FROM, SPIN_TO, x)
+			var keys: Array = [[0.0, _from_rot, _from_pos, Vector3.ZERO]] + INSPECT_KEYS
+			_set_pose(_track(keys, 1, x), _track(keys, 2, x))
+			_bend = _track(keys, 3, x)
 			if x >= 1.0:
 				_spin = 0.0
 				_open = 0.0
+				_bend = Vector3.ZERO
 				_next(State.IDLE)
+
+
+## キー列の field 番目（1：rot、2：pos）を時刻 x でなめらかにつなぐ（Catmull-Rom）。
+func _track(keys: Array, field: int, x: float) -> Vector3:
+	var i := 0
+	while i < keys.size() - 2 and x > keys[i + 1][0]:
+		i += 1
+	var t0: float = keys[i][0]
+	var t1: float = keys[i + 1][0]
+	var u := clampf((x - t0) / maxf(t1 - t0, 0.0001), 0.0, 1.0)
+	var p1: Vector3 = keys[i][field]
+	var p2: Vector3 = keys[i + 1][field]
+	var p0: Vector3 = keys[i - 1][field] if i > 0 else p1
+	var p3: Vector3 = keys[i + 2][field] if i + 2 < keys.size() else p2
+	var u2 := u * u
+	return 0.5 * (2.0 * p1 + (p2 - p0) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * u2 * u)
 
 
 func _set_pose(rot: Vector3, pos: Vector3) -> void:
@@ -411,25 +460,37 @@ func retract_amount() -> float:
 
 func _apply_pose() -> void:
 	var r := _rot + _settle_rot + Vector3(_sway.y, _sway.x, -_sway.x * 0.6)
-	var rot := Vector3(deg_to_rad(r.x), deg_to_rad(r.y), deg_to_rad(r.z))
 	# 引っ込めるときは刃先を上へ逃がす
-	rot.x += _retract / RETRACT_MAX * deg_to_rad(40.0)
+	var pitch := deg_to_rad(r.x) + _retract / RETRACT_MAX * deg_to_rad(40.0)
+	# x・y は肘を中心に、z（ひねり）は前腕の軸まわりに手首を中心に回す
+	var b := Basis.from_euler(Vector3(pitch, deg_to_rad(r.y), 0.0))
+	var arm := Transform3D(b, ELBOW - b * ELBOW + _pos + _settle_pos)
+	var tw := Basis(_forearm, deg_to_rad(r.z))
+	var twist := Transform3D(tw, _wrist - tw * _wrist)
 	# 体積を保ったまま刃の向き(Z)に伸び縮みさせる
 	var sz := 1.0 + _squash
 	var sxy := 1.0 / sqrt(sz)
-	var b := Basis.from_euler(rot)
-	swing.transform = Transform3D(b * Basis.from_scale(Vector3(sxy, sxy, sz)), ELBOW - b * ELBOW + _pos + _settle_pos)
+	# 手首の曲げ：前腕に垂直な2軸まわりに、手首を中心に回す
+	var side := _forearm.cross(Vector3.UP).normalized()
+	var up := side.cross(_forearm).normalized()
+	var bb := Basis(up, deg_to_rad(_bend.x)) * Basis(side, deg_to_rad(_bend.y))
+	var bend := Transform3D(bb, _wrist - bb * _wrist)
+	swing.transform = arm * twist * bend * Transform3D(Basis.from_scale(Vector3(sxy, sxy, sz)), Vector3.ZERO)
 	position = _base_position + Vector3(0.0, -_retract * 0.2 + _land, _retract) + _bob()
 
 
 ## 指の曲げとナイフの回転を反映する。
 func _apply_hand() -> void:
-	var spin := Transform3D(Basis(Vector3.RIGHT, _spin), Vector3.ZERO)
+	var spin := Transform3D(Basis(_spin_axis, _spin), Vector3.ZERO)
 	grip.transform = _grip_rest * Transform3D(Basis.IDENTITY, _spin_pivot) * spin * Transform3D(Basis.IDENTITY, -_spin_pivot)
+	_pose_fingers()
+
+
+func _pose_fingers() -> void:
 	if _skeleton == null:
 		return
 	for finger in CURL_GRIP:
-		var closed: Array = CURL_GRIP[finger]
+		var closed: Array = CURL_GRIP[finger] if finger != "thumb" else [thumb_grip.x, thumb_grip.y, thumb_grip.z]
 		var opened: Array = CURL_SPIN[finger]
 		for k in 3:
 			var idx := _skeleton.find_bone("%s_%d" % [finger, k + 1])
@@ -437,7 +498,10 @@ func _apply_hand() -> void:
 				continue
 			var angle := deg_to_rad(lerpf(closed[k], opened[k], _open))
 			var rest := _skeleton.get_bone_rest(idx).basis.get_rotation_quaternion()
-			_skeleton.set_bone_pose_rotation(idx, rest * Quaternion(Vector3.RIGHT, angle))
+			var q := Quaternion(Vector3.RIGHT, angle)
+			if finger == "thumb" and k == 0:
+				q = Quaternion(Vector3.BACK, deg_to_rad(lerpf(thumb_across, thumb_across_spin, _open))) * q
+			_skeleton.set_bone_pose_rotation(idx, rest * q)
 
 
 ## 色テクスチャから抜き出した水色・マゼンタの線（*_emission.png）を光らせる。
@@ -554,6 +618,61 @@ func _fit(model: Node3D) -> void:
 	var offset := Vector3(-center.x, -center.y, grip_back - moved.end.z)
 	model.transform = Transform3D(b, offset) * model.transform
 	_spin_pivot = _find_ring_center(model)
+	_blade_dir = _find_blade_dir(model)
+	_spin_axis = _blade_dir.cross(Vector3.BACK).normalized()
+
+
+## 刃先の側（全長の後ろ半分）の頂点が、柄の軸からどちらへ寄っているか。カランビットの刃が曲がる向き。
+func _find_blade_dir(model: Node3D) -> Vector3:
+	var sum := Vector2.ZERO
+	var to_z := grip_back - model_length * 0.6
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		var mesh_i := mi as MeshInstance3D
+		var rel: Transform3D = grip.global_transform.affine_inverse() * mesh_i.global_transform
+		for si in mesh_i.mesh.get_surface_count():
+			for v in mesh_i.mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]:
+				var p: Vector3 = rel * v
+				if p.z < to_z:
+					sum += Vector2(p.x - _spin_pivot.x, p.y - _spin_pivot.y)
+	return Vector3.UP if sum.length() < 0.0001 else Vector3(sum.x, sum.y, 0.0).normalized()
+
+
+## 握った指の形から、ナイフを持たせる位置と向きを決める。
+## 人差し指の付け根の節（index_1〜index_2の間）に輪を通し、中指〜小指が巻く空間に柄を通して、
+## 小指の側から刃を出す。刃は拳の前(-Z)へ曲がる向きにする。
+func _fit_to_hand() -> void:
+	if _skeleton == null or not using_model:
+		return
+	_open = 0.0
+	_pose_fingers()
+	var to_swing := swing.global_transform.affine_inverse() * _skeleton.global_transform
+	var hand := to_swing * _skeleton.get_bone_global_pose(_skeleton.find_bone("hand"))
+	_wrist = hand.origin
+	_forearm = hand.basis.y.normalized()
+	var ring := (_joint(to_swing, "index_1") + _joint(to_swing, "index_2")) * 0.5
+	var down := (_finger_hollow(to_swing, "pinky") - ring).normalized() # 輪から刃の出る側へ
+	var fwd := Vector3.FORWARD - down * Vector3.FORWARD.dot(down)
+	if fwd.length() < 0.01:
+		return
+	fwd = fwd.normalized()
+	# モデルの軸（柄の向き Z・刃の曲がる向き）を、手の軸（上向き・拳の前）に合わせる
+	var src := Basis(_blade_dir.cross(Vector3.BACK), _blade_dir, Vector3.BACK)
+	var dst := Basis(fwd.cross(-down), fwd, -down)
+	var b := dst * src.inverse()
+	_grip_rest = Transform3D(b, ring - b * _spin_pivot)
+	grip.transform = _grip_rest
+
+
+func _joint(to_swing: Transform3D, bone: String) -> Vector3:
+	return to_swing * _skeleton.get_bone_global_pose(_skeleton.find_bone(bone)).origin
+
+
+## 握った指が巻いてできる輪の中心。付け根・中・先の節と指先の平均。
+func _finger_hollow(to_swing: Transform3D, finger: String) -> Vector3:
+	var a := _joint(to_swing, finger + "_1")
+	var b := _joint(to_swing, finger + "_2")
+	var c := _joint(to_swing, finger + "_3")
+	return (a + b + c + c + (c - b) * 0.9) * 0.25
 
 
 ## 柄頭の側（Gripの+Z端）にある輪の中心。柄頭から全長の1割の範囲の頂点の中心をとる。

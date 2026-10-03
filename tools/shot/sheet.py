@@ -9,7 +9,7 @@ out = pathlib.Path(sys.argv[1])
 groups = collections.defaultdict(list)
 for f in sorted(out.glob("*.png")):
     if not f.name.startswith("sheet_"):
-        groups[f.stem.rsplit("_", 1)[0]].append(f)
+        groups[f.stem.split("_", 1)[0]].append(f)
 for name, files in groups.items():
     ims = [Image.open(f).convert("RGB") for f in files]
     w, h = 480, 270

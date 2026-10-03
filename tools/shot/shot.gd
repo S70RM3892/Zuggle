@@ -47,10 +47,38 @@ func _run() -> void:
 		_player.get_node("Head/Camera3D/ViewLight").visible = false
 		await _wait(0.2)
 		await _save("idle_1")
+	if mode == "grip" or mode == "inspect":
+		await _grip_views(mode)
+	if mode == "thumb":
+		await _place(Vector3(-15, 0.9, 5.6), 0.0, 0.0)
+		var weapon: Weapon = _player.get_node("Head/Camera3D/Hand")
+		weapon.set_physics_process(false)
+		var cam := Camera3D.new()
+		cam.fov = 40.0
+		cam.near = 0.01
+		add_child(cam)
+		for curl in [[-40.0, 30.0, 30.0], [80.0, 70.0, 60.0]]:
+			for across in [-90.0, -45.0, 0.0, 45.0]:
+				weapon.thumb_across = across
+				weapon.thumb_grip = Vector3(curl[0], curl[1], curl[2])
+				weapon.call("_pose_fingers")
+				var center: Vector3 = weapon.get_node("Swing/Grip").global_position
+				for a in [["back", Vector3(0.15, 0.12, 0.45)]]:
+					cam.global_position = center + a[1]
+					cam.look_at(center)
+					cam.make_current()
+					await _save("thumb_%+03d_%+03d_%s" % [int(curl[0]), int(across), a[0]])
 	if mode == "compass":
 		for yaw in COMPASS:
 			await _place(Vector3(0, 0.9, 0), yaw, 8.0)
 			await _save("compass_%03d" % int(yaw))
+	if mode == "look":
+		await _place(Vector3(-15, 0.9, 5.6), 0.0, -3.0)
+		var w: Weapon = _player.get_node("Head/Camera3D/Hand")
+		w.set_physics_process(false)
+		w.call("_start_inspect")
+		await _steps(w, "inspect", 16, Weapon.INSPECT_TIME / 15.0)
+		w.set_physics_process(true)
 	if mode == "swing" or mode == "all":
 		# 描画が遅くても動きを等間隔に撮れるよう、武器の時間を手で進める
 		await _place(Vector3(-5, 0.9, 5.6), 0.0, -3.0)
@@ -61,7 +89,7 @@ func _run() -> void:
 			await _steps(weapon, "swing%d" % k, SWING_FRAMES, SWING_STEP)
 			_steps_silent(weapon, 0.25) # 振り終わってすぐ次を振り、型をつなげる
 		weapon.call("_start_inspect")
-		await _steps(weapon, "inspect", SWING_FRAMES, 0.09)
+		await _steps(weapon, "inspect", 16, Weapon.INSPECT_TIME / 15.0)
 		weapon.set_physics_process(true)
 	get_tree().quit()
 
@@ -74,6 +102,37 @@ func _place(pos: Vector3, yaw: float, pitch: float) -> void:
 	await _wait(0.6)
 	_player.head.rotation = Vector3(deg_to_rad(pitch), 0, 0)
 	await _wait(0.4)
+
+
+## 手元を別のカメラで、横・上・前・後ろから撮る。inspect ではナイフ回しの途中も撮る。
+func _grip_views(mode: String) -> void:
+	await _place(Vector3(-15, 0.9, 5.6), 0.0, 0.0)
+	var weapon: Weapon = _player.get_node("Head/Camera3D/Hand")
+	weapon.set_physics_process(false)
+	var cam := Camera3D.new()
+	cam.fov = 40.0
+	cam.near = 0.01
+	add_child(cam)
+	var times: Array = [0.0] if mode == "grip" else [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9]
+	if mode == "inspect":
+		weapon.call("_start_inspect")
+	var done := 0.0
+	for t in times:
+		_steps_silent(weapon, t - done)
+		done = t
+		var center: Vector3 = weapon.get_node("Swing/Grip").global_position
+		var angles: Array = [["side", Vector3(-0.55, 0.05, 0.0)], ["top", Vector3(0.0, 0.55, 0.05)], ["front", Vector3(0.0, 0.05, -0.55)], ["back", Vector3(0.15, 0.12, 0.45)]]
+		if mode == "inspect":
+			angles = [angles[3], angles[0]]
+		for a in angles:
+			cam.global_position = center + a[1]
+			cam.look_at(center, Vector3.UP if a[0] != "top" else Vector3.FORWARD)
+			cam.make_current()
+			await _save("%s_%02d_%s" % [mode, int(t * 100), a[0]])
+		_player.camera.make_current()
+		await _save("%s_%02d_view" % [mode, int(t * 100)])
+	cam.queue_free()
+	weapon.set_physics_process(true)
 
 
 func _steps(weapon: Weapon, name: String, frames: int, step: float) -> void:
