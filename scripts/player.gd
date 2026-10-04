@@ -55,6 +55,7 @@ var _crouch_amount := 0.0 # 目線の下がり具合（0〜1）。見た目用�
 var _climbing := false
 var _climb_time := 0.0
 var _climbed_wall_normal := Vector3.ZERO # 着地するまで同じ壁は登り直さない
+var _climb_carry := 0.0 # 壁登りに入る前の水平の速さ。登り切ったとき（縁掴み・上端越え）に持ち出す
 
 var _controller: Object = null # 手のアクションが体を動かしている間はここに入る
 var _was_on_floor := true
@@ -226,11 +227,15 @@ func take_control(controller: Object) -> void:
 
 
 ## 体を返す。持ち出す速度を渡す。
-func release_control(exit_velocity: Vector3) -> void:
+## grounded（縁の上に乗った・障害物を突いて越えた）なら足場を蹴れるので、動作の終わり際に押したジャンプを出口で出す。
+func release_control(exit_velocity: Vector3, grounded := false) -> void:
 	_controller = null
 	velocity = exit_velocity
-	_jump_buffer_timer = 0.0
 	_was_on_floor = false
+	if grounded:
+		_coyote_timer = Tuning.coyote_time
+	else:
+		_jump_buffer_timer = 0.0
 
 
 ## 壁走り・壁登りを止めて、その壁には着地するまで入り直さない。壁押しで使う。
@@ -241,6 +246,11 @@ func leave_wall(n: Vector3) -> void:
 	_climbed_wall_normal = n
 	_wall_coyote_timer = 0.0
 	_rising_from_jump = false
+
+
+## 手のアクションに持ち込める水平の速さ。壁登り中は、登る前の速さを覚えている。
+func carry_speed() -> float:
+	return maxf(horizontal_speed(), _climb_carry) if _climbing else horizontal_speed()
 
 
 ## 体の向きを水平に回す（ポール回りでカメラをついて行かせる）。
@@ -372,7 +382,7 @@ func _try_start_wallrun(before: Vector3) -> void:
 	# 0なら壁と平行、1なら正面衝突。負なら壁から離れている
 	var into := -dir.dot(n)
 	if into > sin(deg_to_rad(Tuning.wallrun_max_angle)):
-		_try_start_climb(n)
+		_try_start_climb(n, speed)
 		return
 	if into < -0.1:
 		return
@@ -443,14 +453,15 @@ func _end_wallrun() -> void:
 
 
 ## 壁登り：壁へ正面から当たり、壁へ向けてスティックを倒していたら、壁を蹴って真上へ駆け上がる。
-## 速さは上向きへ変わる。登った先の縁は左手で掴む。
-func _try_start_climb(n: Vector3) -> void:
+## 速さは上向きへ変わる。登った先の縁は左手で掴む。登る前の水平の速さは覚えておき、登り切ったら前へ持ち出す。
+func _try_start_climb(n: Vector3, speed: float) -> void:
 	if n.dot(_climbed_wall_normal) > 0.9 or velocity.y < Tuning.wallclimb_min_vy:
 		return
 	if _input_direction().dot(-n) < WALL_CLIMB_MIN_INPUT:
 		return
 	_climbing = true
 	_climb_time = 0.0
+	_climb_carry = speed
 	_wall_normal = n
 	_climbed_wall_normal = n
 	_rising_from_jump = false
@@ -478,9 +489,9 @@ func _check_climb_end() -> void:
 	elif _input_direction().dot(_wall_normal) > 0.5:
 		_climbing = false
 	elif _cast_wall(-_wall_normal) == Vector3.ZERO:
-		# 壁の上端を越えた：前へ少し押し出して上に乗せる
+		# 壁の上端を越えた：前へ押し出して上に乗せる。登る前の速さも持ち出す
 		_climbing = false
-		velocity += -_wall_normal * Tuning.wallclimb_top_push
+		velocity += -_wall_normal * maxf(Tuning.wallclimb_top_push, _climb_carry * Tuning.mantle_keep)
 
 
 ## 壁ジャンプ：壁から離れる向きと上へ跳ぶ。スティックを倒していればその向きへ跳び、速さは落とさない。

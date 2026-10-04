@@ -34,8 +34,13 @@ func _run() -> void:
 	await _test_slide_under_bar()
 	await _test_wall_climb()
 	await _test_climb_and_grab()
+	await _test_climb_grab_keeps_speed()
 	await _test_ledge_from_jump()
+	await _test_mantle_jump()
+	await _test_early_jump_in_mantle()
 	await _test_vault()
+	await _test_vault_jump()
+	await _test_left_hold_after_vault()
 	await _test_wall_push_from_wallrun()
 	await _test_wall_push_on_ground()
 	await _test_pole_swing()
@@ -70,6 +75,8 @@ func _stand(pos: Vector3, yaw := 0.0) -> void:
 	_player.global_position = pos
 	_player.rotation = Vector3(0, deg_to_rad(yaw), 0)
 	_player.velocity = Vector3.ZERO
+	_actions.last_left = ""
+	_actions.last_right = ""
 	await _frames(40)
 
 
@@ -238,6 +245,63 @@ func _test_climb_and_grab() -> void:
 	_release_all()
 
 
+func _test_climb_grab_keeps_speed() -> void:
+	print("壁登りから縁を掴んでも、登る前の速さを持ち出す")
+	await _stand(Vector3(22, 0.9, -8.5))
+	Input.action_press("hand_left")
+	await _run_until_z(-11.0)
+	var speed := _player.horizontal_speed()
+	Input.action_press("jump")
+	var exit := -1.0
+	var was_busy := false
+	for i in int(2.0 / DT):
+		await get_tree().physics_frame
+		if _actions.is_busy():
+			was_busy = true
+		elif was_busy:
+			exit = _player.horizontal_speed() # 体を返した瞬間の速さ（まだ走りで加速していない）
+			break
+	_check(exit >= speed * Tuning.mantle_keep - 0.3, "出口の速さ (%.2f → %.2f)" % [speed, exit])
+	_release_all()
+
+
+## ParkourLab の縁（MantleBlock）へ跳んで掴み、登り切る press_before_end 秒前にジャンプを押す。
+## 体を返した瞬間の速さ exit と、その0.1秒後の {vy, feet, speed} を返す。
+func _mantle_then_jump(press_before_end: float) -> Dictionary:
+	await _stand(Vector3(22, 0.9, -1.5))
+	Input.action_press("hand_left")
+	await _run_until_z(-3.0)
+	Input.action_press("jump")
+	await _frames(2)
+	Input.action_release("jump")
+	while _actions.move != HandActions.Move.MANTLE:
+		await get_tree().physics_frame
+	var wait := maxi(0, int((_actions._duration - press_before_end) / DT))
+	await _frames(wait)
+	Input.action_press("jump")
+	while _actions.is_busy():
+		await get_tree().physics_frame
+	var exit := _player.horizontal_speed()
+	await _frames(int(0.1 / DT))
+	var out := {"exit": exit, "vy": _player.velocity.y, "feet": _player.feet_position().y, "speed": _player.horizontal_speed()}
+	_release_all()
+	return out
+
+
+func _test_mantle_jump() -> void:
+	print("縁から登り切る直前にジャンプを押すと、上に乗った瞬間に跳ぶ")
+	var r := await _mantle_then_jump(0.05)
+	_check(r.vy > 3.0, "跳ぶ (vy %.2f)" % r.vy)
+	_check(r.feet > 2.2, "縁の上から跳ぶ (足 %.2f)" % r.feet)
+	_check(r.speed >= r.exit - 0.3, "速さは落とさない (%.2f → %.2f)" % [r.exit, r.speed])
+
+
+func _test_early_jump_in_mantle() -> void:
+	print("掴んですぐのジャンプは、登り切ったときには残っていない")
+	var r := await _mantle_then_jump(10.0)
+	_check(r.vy < 1.0, "跳ばない (vy %.2f)" % r.vy)
+
+
 func _test_ledge_from_jump() -> void:
 	print("跳んで左手で縁を掴む（左手は押しっぱなしでよい）")
 	await _stand(Vector3(22, 0.9, -1.5))
@@ -275,6 +339,47 @@ func _test_vault() -> void:
 		await get_tree().physics_frame
 	_check(_player.global_position.z < 5.4, "向こう側へ出る (z %.2f)" % _player.global_position.z)
 	_check(_player.horizontal_speed() > speed + Tuning.vault_boost * 0.7, "加速する (%.2f → %.2f)" % [speed, _player.horizontal_speed()])
+	_release_all()
+
+
+func _test_vault_jump() -> void:
+	print("ボールトの終わり際にジャンプを押すと、越えた瞬間に跳ぶ")
+	await _stand(Vector3(22, 0.9, 11))
+	await _run_until_z(7.3)
+	await _tap("hand_right")
+	_check(_actions.move == HandActions.Move.VAULT, "ボールトに入る")
+	await _frames(maxi(0, int((_actions._duration - 0.05) / DT) - 2))
+	Input.action_press("jump")
+	while _actions.is_busy():
+		await get_tree().physics_frame
+	var exit := _player.horizontal_speed()
+	await _frames(int(0.1 / DT))
+	_check(_player.velocity.y > 3.0, "跳ぶ (vy %.2f)" % _player.velocity.y)
+	_check(_player.horizontal_speed() >= exit - 0.3, "ボールトの加速を空中へ持ち出す (%.2f → %.2f)" % [exit, _player.horizontal_speed()])
+	_release_all()
+
+
+func _test_left_hold_after_vault() -> void:
+	print("ボールト中に左手を押しっぱなしにすれば、次の縁は離さずに掴める")
+	await _stand(Vector3(22, 0.9, 11))
+	await _run_until_z(7.3)
+	await _tap("hand_right")
+	_check(_actions.last_right == "vault", "ボールトする")
+	Input.action_press("hand_left") # 先に押すとボールト箱（高さ1m）を縁として掴むので、越え始めてから押す
+	while _actions.is_busy():
+		await get_tree().physics_frame
+	# MantleBlock（上面y=2、手前の面z=-4.5）の手前の空中へ移す
+	_player.global_position = Vector3(22, 1.5, -3.7)
+	_player.velocity = Vector3(0, 2, -5)
+	var grabbed := false
+	for i in int(0.4 / DT):
+		await get_tree().physics_frame
+		if _actions.move == HandActions.Move.MANTLE:
+			grabbed = true
+			break
+	_check(grabbed, "縁を掴む")
+	while _actions.is_busy():
+		await get_tree().physics_frame
 	_release_all()
 
 

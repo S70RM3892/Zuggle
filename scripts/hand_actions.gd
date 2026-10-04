@@ -176,7 +176,7 @@ func find_ledge(dir: Vector3) -> Dictionary:
 
 func _start_mantle(ledge: Dictionary) -> void:
 	var n: Vector3 = ledge.normal
-	var entry := _hvel().length()
+	var entry := _player.carry_speed()
 	var out := _player.facing()
 	if out.dot(-n) < 0.3:
 		out = -n
@@ -280,7 +280,6 @@ func _drive_pole(delta: float) -> void:
 func _release_pole(tangent: Vector3, jumped: bool) -> void:
 	var out := tangent * (_pole_speed + Tuning.pole_release_boost)
 	out.y = maxf(Tuning.pole_release_up, Tuning.jump_velocity if jumped else 0.0)
-	_left_needs_release = true
 	_finish(out)
 
 
@@ -451,9 +450,13 @@ func _begin(m: int) -> void:
 
 
 func _finish(exit_velocity: Vector3) -> void:
+	# 左手で掴み終えたら、一度離すまで押しっぱなしでは掴まない。ボールトは右手なので左手はそのまま
+	if move != Move.VAULT:
+		_left_needs_release = true
+	# 縁の上・障害物の上からは足場を蹴って跳べる。ポールは離すときに自分でジャンプを見る
+	var grounded := move != Move.POLE
 	move = Move.NONE
-	_left_needs_release = true
-	_player.release_control(exit_velocity)
+	_player.release_control(exit_velocity, grounded)
 
 
 func _set_plant(side: int, point: Vector3, palm: Vector3, fingers: Vector3, pose: String, hold: float) -> void:
