@@ -48,6 +48,15 @@ const SPECS := [
 	["wallclimb_max_time", "壁登りの継続時間の上限 (秒)", 0.1, 2.0, 0.05],
 	["wallclimb_min_vy", "壁登りに入れる最低の上下速度 (m/s)", -10.0, 5.0, 0.25],
 	["wallclimb_top_push", "壁の上端を越えたときの前への押し出し (m/s)", 0.0, 6.0, 0.1],
+	["hard_landing_speed", "着地：これ以上の落下の速さで強い着地 (m/s)", 6.0, 30.0, 0.5],
+	["hard_landing_keep", "強い着地で残る水平速度の割合", 0.0, 1.0, 0.05],
+	["hard_landing_time", "強い着地で体勢を崩している時間 (秒)", 0.0, 1.5, 0.05],
+	["roll_window", "受け身：着地の何秒前までのBを受け付けるか (秒)", 0.0, 0.6, 0.01],
+	["roll_late", "受け身：着地の後に押しても間に合う時間 (秒)", 0.0, 0.3, 0.01],
+	["roll_time", "受け身の長さ (秒)", 0.1, 1.2, 0.05],
+	["roll_min_speed", "受け身で前へ出る最低の速さ (m/s)", 0.0, 10.0, 0.1],
+	["land_dip", "着地で視点が前へ倒れる角度 (度, 0でオフ)", 0.0, 60.0, 1.0],
+	["land_shake", "強い着地の画面揺れ (0でオフ)", 0.0, 1.0, 0.01],
 	["hand_buffer", "手のアクションの先行入力 (秒)", 0.0, 0.4, 0.01],
 	["ledge_reach_top", "縁掴み：手が届く高さ（足元から）(m)", 1.5, 3.5, 0.05],
 	["ledge_reach_bottom", "縁掴み：これより低い縁は掴まない（足元から）(m)", 0.0, 1.5, 0.05],
@@ -141,6 +150,15 @@ var wallclimb_gravity_mult := 0.55 # 約2.4m登れる
 var wallclimb_max_time := 0.75
 var wallclimb_min_vy := -3.0 # 落ち始めてすぐなら登れる。深く落ちていたら登れない
 var wallclimb_top_push := 2.5
+var hard_landing_speed := 13.5 # 約3.6mの落下。2mの台から跳び降りても（約3.3m）強い着地にはならない
+var hard_landing_keep := 0.3
+var hard_landing_time := 0.4
+var roll_window := 0.3
+var roll_late := 0.08
+var roll_time := 0.45
+var roll_min_speed := 4.0
+var land_dip := 25.0 # 一回転させると酔うので、うなずく程度
+var land_shake := 0.3
 var hand_buffer := 0.15
 var ledge_reach_top := 2.3 # 片手を上へ伸ばした指先の高さ
 var ledge_reach_bottom := 0.6

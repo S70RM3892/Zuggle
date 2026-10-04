@@ -32,6 +32,11 @@ func _run() -> void:
 	await _test_slide_hop()
 	await _test_overspeed_landing()
 	await _test_slide_under_bar()
+	await _test_low_drop()
+	await _test_hard_landing()
+	await _test_roll()
+	await _test_roll_late()
+	await _test_roll_into_slide()
 	await _test_wall_climb()
 	await _test_climb_and_grab()
 	await _test_climb_grab_keeps_speed()
@@ -207,6 +212,104 @@ func _test_slide_under_bar() -> void:
 			break
 	_check(under_crouched, "バーの下では離しても立たない")
 	_check(_player.global_position.z < -1.5, "くぐり抜ける (z %.2f)" % _player.global_position.z)
+	_release_all()
+
+
+## 開けた床の上 height m から、前(-Z)へ8 m/sで落とす。走りは押したまま。
+func _drop(height: float) -> void:
+	await _stand(Vector3(0, 0.9, 13))
+	_player.global_position = Vector3(0, 0.9 + height, 13)
+	_player.velocity = Vector3(0, 0, -8)
+	await _frames(1)
+	_player.velocity = Vector3(0, 0, -8)
+	Input.action_press("move_forward")
+
+
+func _until_landed(max_sec := 2.0) -> void:
+	for i in int(max_sec / DT):
+		await get_tree().physics_frame
+		if _player.is_on_floor():
+			return
+
+
+## 着地まで feet m を切ったところ（4.5mからなら着地の約0.07秒前）まで待つ。
+func _until_feet_below(feet: float) -> void:
+	for i in int(2.0 / DT):
+		if _player.feet_position().y < feet:
+			return
+		await get_tree().physics_frame
+
+
+func _test_low_drop() -> void:
+	print("2mからの落下は普通に着地する")
+	await _drop(2.0)
+	await _until_landed()
+	await _frames(2)
+	_check(not _player.is_hard_landing() and not _player.is_rolling(), "強い着地にも受け身にもならない")
+	_check(_player.horizontal_speed() > 7.8, "速さはそのまま (%.2f)" % _player.horizontal_speed())
+	_release_all()
+
+
+func _test_hard_landing() -> void:
+	print("4.5mから落ちてBを押さなければ、強い着地で減速する")
+	await _drop(4.5)
+	await _until_landed()
+	_check(_player.is_hard_landing(), "強い着地になる")
+	_check(_player.horizontal_speed() < 3.5, "大きく減速する (%.2f)" % _player.horizontal_speed())
+	_check(_player.is_crouching(), "体が低くなる")
+	await _frames(int((Tuning.hard_landing_time + 0.3) / DT))
+	_check(not _player.is_hard_landing() and not _player.is_crouching(), "体勢を立て直す")
+	_check(_player.horizontal_speed() > 7.5, "また走れる (%.2f)" % _player.horizontal_speed())
+	_release_all()
+
+
+func _test_roll() -> void:
+	print("着地の直前にBで受け身：速さを保って転がる")
+	await _drop(4.5)
+	await _until_feet_below(1.0)
+	await _tap("crouch")
+	await _until_landed()
+	await _frames(2)
+	_check(_player.is_rolling() and not _player.is_hard_landing(), "受け身を取る")
+	_check(_player.horizontal_speed() > 7.8, "速さを保つ (%.2f)" % _player.horizontal_speed())
+	await _frames(int(0.15 / DT))
+	_check(_player.camera.rotation.x < -deg_to_rad(Tuning.land_dip) * 0.5, "視点が前へ倒れる (%.0f 度)" % rad_to_deg(_player.camera.rotation.x))
+	var low := _player.feet_position().y + 0.4
+	_check(_hands.hand_position(HandActions.Side.LEFT).y < low and _hands.hand_position(HandActions.Side.RIGHT).y < low, "両手を床につく")
+	_check(_legs._legs[0].hip_a > 80.0 and _legs._legs[0].hip_a < 120.0, "膝を抱える (%.0f 度)" % _legs._legs[0].hip_a)
+	await _frames(int(Tuning.roll_time / DT) + 10)
+	_check(not _player.is_rolling() and not _player.is_crouching(), "転がり終えて立つ")
+	_check(not _player.is_sliding(), "Bを離していればスライディングにはならない")
+	_check(_player.horizontal_speed() > 7.5, "そのまま走る (%.2f)" % _player.horizontal_speed())
+	_release_all()
+
+
+func _test_roll_late() -> void:
+	print("着地の直後のBでも、まだ受け身に間に合う")
+	await _drop(4.5)
+	await _until_landed()
+	_check(_player.is_hard_landing(), "いったん強い着地になる")
+	await _tap("crouch")
+	_check(_player.is_rolling(), "受け身に切り替える")
+	_check(_player.horizontal_speed() > 7.8, "速さが戻る (%.2f)" % _player.horizontal_speed())
+	_release_all()
+	print("遅すぎるBでは間に合わない")
+	await _drop(4.5)
+	await _until_landed()
+	await _frames(int((Tuning.roll_late + 0.05) / DT))
+	await _tap("crouch")
+	_check(_player.is_hard_landing() and not _player.is_rolling(), "強い着地のまま")
+	_release_all()
+
+
+func _test_roll_into_slide() -> void:
+	print("Bを押したまま受け身を取ると、転がり終えてスライディングへつなぐ")
+	await _drop(4.5)
+	await _until_feet_below(1.0)
+	Input.action_press("crouch")
+	await _until_landed()
+	await _frames(int((Tuning.roll_time + 0.05) / DT))
+	_check(_player.is_sliding(), "スライディングに入る (%.2f m/s)" % _player.horizontal_speed())
 	_release_all()
 
 

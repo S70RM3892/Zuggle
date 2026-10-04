@@ -1,7 +1,7 @@
 class_name Player
 extends CharacterBody3D
 ## 一人称プレイヤー。走り・ジャンプ・コヨーテタイム・先行入力・壁走り（方向転換・壁ジャンプ）・
-## スライディング・しゃがみ・壁登り・画面揺れ。
+## スライディング・しゃがみ・壁登り・着地（受け身・強い着地）・画面揺れ。
 ## 左手・右手のアクション（縁掴み・ポール回り・ボールト・壁押し）は子の HandActions が持ち、
 ## 動いている間だけ take_control() で体の動きを預かる。
 ## 大原則：動作を切り替えても水平方向の速度を落とさない。
@@ -51,6 +51,13 @@ var _crouch_buffer := 0.0 # 空中でしゃがみを押したら、着地した�
 var _slide_cooldown := 0.0 # スライディングの加速を連打で重ねないための待ち
 var _slide_time := 0.0
 var _crouch_amount := 0.0 # 目線の下がり具合（0〜1）。見た目用になめらかに追う
+
+var _roll_buffer := 0.0 # しゃがみを押してから受け身を受け付ける残り時間
+var _rolling := 0.0 # 受け身の残り時間
+var _stun := 0.0 # 強い着地の残り時間。この間は体が低く、遅い
+var _stun_age := 0.0 # 強い着地からの経過時間。roll_late 以内にしゃがみを押せば受け身に切り替える
+var _stun_velocity := Vector3.ZERO # 強い着地の直前の水平速度。受け身に切り替えたら戻す
+var _land_dip := 0.0 # 着地で視点を前へ倒す角度（ラジアン）
 
 var _climbing := false
 var _climb_time := 0.0
@@ -107,13 +114,17 @@ func _physics_process(delta: float) -> void:
 		_try_jump()
 		_apply_jump_cut()
 		if _sliding:
-			_apply_slide(delta)
+			_apply_glide(Tuning.slide_friction, delta)
+		elif _rolling > 0.0:
+			_apply_glide(0.0, delta)
 		else:
 			_apply_horizontal(delta)
 	var before := velocity
 	move_and_slide()
 	_landed = is_on_floor() and not _was_on_floor
 	_was_on_floor = is_on_floor()
+	if _landed:
+		_land(-before.y)
 	if _wallrunning:
 		_check_wallrun_end()
 	elif _climbing:
@@ -138,6 +149,8 @@ func respawn() -> void:
 	_sliding = false
 	_crouch_buffer = 0.0
 	_slide_cooldown = 0.0
+	_roll_buffer = 0.0
+	_end_landing()
 	_set_crouched(false)
 	_crouch_amount = 0.0
 	if _controller != null and _controller.has_method("cancel"):
@@ -176,6 +189,16 @@ func is_crouching() -> bool:
 
 func is_climbing() -> bool:
 	return _climbing
+
+
+## 受け身の最中か。
+func is_rolling() -> bool:
+	return _rolling > 0.0
+
+
+## 強い着地で体勢を崩している最中か。
+func is_hard_landing() -> bool:
+	return _stun > 0.0
 
 
 func is_controlled() -> bool:
@@ -222,6 +245,7 @@ func take_control(controller: Object) -> void:
 	_wallrunning = false
 	_climbing = false
 	_sliding = false
+	_end_landing()
 	_rising_from_jump = false
 	_set_crouched(false)
 
@@ -301,8 +325,10 @@ func _update_timers(delta: float) -> void:
 		_jump_buffer_timer -= delta
 	if input_enabled and Input.is_action_just_pressed("crouch"):
 		_crouch_buffer = Tuning.slide_buffer
+		_roll_buffer = Tuning.roll_window
 	else:
 		_crouch_buffer -= delta
+		_roll_buffer -= delta
 
 
 func _apply_gravity(delta: float) -> void:
@@ -323,8 +349,9 @@ func _try_jump() -> void:
 		_jump_buffer_timer = 0.0
 		_coyote_timer = 0.0
 		_rising_from_jump = true
-		# スライディングから跳んでも速さはそのまま持ち出す（スライドジャンプ）
+		# スライディング・受け身から跳んでも速さはそのまま持ち出す（スライドジャンプ）
 		_sliding = false
+		_end_landing()
 		_set_crouched(false)
 	elif _jump_buffer_timer > 0.0 and _wall_coyote_timer > 0.0:
 		_wall_jump(_last_wall_normal)
@@ -565,6 +592,9 @@ func _input_direction() -> Vector3:
 ## 遅いときはしゃがみ歩き。低い天井の下では立ち上がらない。
 func _update_crouch(delta: float) -> void:
 	var held := input_enabled and Input.is_action_pressed("crouch")
+	if _rolling > 0.0 or _stun > 0.0:
+		_update_landing(delta, held)
+		return
 	if is_on_floor():
 		# 押した直後か、押しっぱなしで着地した瞬間（スライドホップ）ならスライディング
 		var wants := _crouch_buffer > 0.0 or (held and _landed)
@@ -598,10 +628,10 @@ func _start_slide() -> void:
 		_slide_cooldown = Tuning.slide_boost_cooldown
 
 
-## スライディング中：向きはほぼ保ったまま、少しずつ減速する。スティックで少しだけ曲がれる。
-func _apply_slide(delta: float) -> void:
+## スライディング・受け身の間：向きはほぼ保ったまま、friction で減速する。スティックで少しだけ曲がれる。
+func _apply_glide(friction: float, delta: float) -> void:
 	var h := Vector2(velocity.x, velocity.z)
-	var speed := maxf(0.0, h.length() - Tuning.slide_friction * delta)
+	var speed := maxf(0.0, h.length() - friction * delta)
 	var dir := h.normalized() if h.length() > 0.01 else Vector2.ZERO
 	var wish := _input_direction()
 	var w := Vector2(wish.x, wish.z)
@@ -612,6 +642,63 @@ func _apply_slide(delta: float) -> void:
 	h = dir * speed
 	velocity.x = h.x
 	velocity.z = h.y
+
+
+## 着地。高いところから落ちたとき（落下の速さが hard_landing_speed 以上）、
+## 着地の直前にしゃがみを押していれば受け身で速さを保ち、押していなければ強い着地で大きく減速する。
+func _land(fall_speed: float) -> void:
+	if fall_speed < Tuning.hard_landing_speed:
+		return
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	if _roll_buffer > 0.0:
+		_start_roll(h)
+		return
+	_stun = Tuning.hard_landing_time
+	_stun_age = 0.0
+	_stun_velocity = h
+	velocity.x = h.x * Tuning.hard_landing_keep
+	velocity.z = h.z * Tuning.hard_landing_keep
+	_sliding = false
+	_set_crouched(true)
+	add_trauma(Tuning.land_shake)
+
+
+## 受け身：体を低くして転がり、着地の前の水平の速さをそのまま前へ持ち出す。真下に落ちても前へ出る。
+func _start_roll(h: Vector3) -> void:
+	var speed := h.length()
+	var dir := h / speed if speed > 0.5 else facing()
+	speed = maxf(speed, Tuning.roll_min_speed)
+	velocity.x = dir.x * speed
+	velocity.z = dir.z * speed
+	_rolling = Tuning.roll_time
+	_stun = 0.0
+	_roll_buffer = 0.0
+	_crouch_buffer = 0.0 # 着地でスライディングには入らない（受け身が終わってから）
+	_sliding = false
+	_set_crouched(true)
+
+
+## 受け身・強い着地の間は体を低くしたまま。強い着地の直後なら、まだ受け身に切り替えられる。
+## 受け身が終わったときにしゃがみを押し続けていれば、そのままスライディングへつなぐ。
+func _update_landing(delta: float, held: bool) -> void:
+	if _stun > 0.0:
+		_stun_age += delta
+		if _roll_buffer > 0.0 and _stun_age <= Tuning.roll_late:
+			_start_roll(_stun_velocity)
+			return
+		_stun -= delta
+		return
+	_rolling -= delta
+	if _rolling > 0.0 and is_on_floor():
+		return
+	_rolling = 0.0
+	if held and is_on_floor() and horizontal_speed() >= Tuning.slide_min_speed:
+		_start_slide()
+
+
+func _end_landing() -> void:
+	_rolling = 0.0
+	_stun = 0.0
 
 
 func _set_crouched(on: bool) -> void:
@@ -646,11 +733,18 @@ func _update_camera(delta: float) -> void:
 	elif _sliding:
 		roll = deg_to_rad(Tuning.slide_tilt)
 	_roll = lerpf(_roll, roll, minf(1.0, 10.0 * delta))
+	# 着地：受け身・強い着地の間、視点を前へ倒して戻す
+	var dip := 0.0
+	if _rolling > 0.0:
+		dip = sin(PI * (1.0 - _rolling / maxf(Tuning.roll_time, 0.01)))
+	elif _stun > 0.0:
+		dip = 0.6 * sin(PI * (1.0 - _stun / maxf(Tuning.hard_landing_time, 0.01)))
+	_land_dip = dip * deg_to_rad(Tuning.land_dip)
 	# 画面揺れ（トラウマ値の減衰方式）：揺れ = トラウマ²、向きはノイズで滑らかに
 	_trauma = maxf(0.0, _trauma - Tuning.shake_decay * delta)
 	_shake_time += delta * Tuning.shake_freq
 	var shake := _trauma * _trauma * deg_to_rad(Tuning.shake_max_angle)
 	camera.rotation = Vector3(
-		shake * _noise.get_noise_2d(_shake_time, 0.0),
+		-_land_dip + shake * _noise.get_noise_2d(_shake_time, 0.0),
 		shake * _noise.get_noise_2d(_shake_time, 100.0),
 		_roll + shake * 0.5 * _noise.get_noise_2d(_shake_time, 200.0))

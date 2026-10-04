@@ -4,6 +4,7 @@ extends Node3D
 ## 左手は右手のモデルを左右反転して使う。
 ## ふだんは画面の下の端で、走ると腕を振る。手のアクション（HandActions.plant）があると、
 ## その場所へ素早く手を伸ばして掴む・つく。壁走り中は壁の側の手を壁に添え、壁登り中は両手で壁を叩く。
+## 受け身・強い着地では両手を前の床につく。
 
 ## 手の座標：-Z が指先、+Y が親指側、-X が手のひら側（右手）。原点は握りこぶしの中心
 const MIRROR := Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1))
@@ -83,6 +84,8 @@ func _target(side: int) -> Dictionary:
 	var plant := _actions.plant(side) if _actions else {}
 	if not plant.is_empty():
 		return {"transform": _to_camera(side, plant.point, plant.palm, plant.fingers), "planted": true, "pose": plant.pose}
+	if _player.is_rolling() or _player.is_hard_landing():
+		return _floor_touch(side)
 	var wall := _player.wall_normal()
 	if wall != Vector3.ZERO:
 		var touch := _wall_touch(side, wall)
@@ -120,6 +123,16 @@ func _wall_touch(side: int, wall: Vector3) -> Dictionary:
 	var p := surface + ahead + Vector3.UP * 0.05
 	var fingers := (Vector3.UP * 0.6 + _player.wall_direction()).normalized()
 	return {"transform": _to_camera(side, p + wall * 0.03, -wall, fingers), "planted": true, "pose": "flat"}
+
+
+## 受け身は平手で床を押さえて転がり、強い着地は指を開いて床を突く。
+func _floor_touch(side: int) -> Dictionary:
+	var s := -1.0 if side == HandActions.Side.LEFT else 1.0
+	var f := _player.facing()
+	var right := f.cross(Vector3.UP)
+	var p := _player.feet_position() + f * 0.9 + right * (0.22 * s) + Vector3.UP * 0.04
+	var pose := "flat" if _player.is_rolling() else "open"
+	return {"transform": _to_camera(side, p, Vector3.DOWN, f), "planted": true, "pose": pose}
 
 
 func _rest(side: int) -> Transform3D:
