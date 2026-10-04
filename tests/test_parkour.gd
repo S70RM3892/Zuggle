@@ -37,12 +37,19 @@ func _run() -> void:
 	await _test_roll()
 	await _test_roll_late()
 	await _test_roll_into_slide()
+	await _test_roll_held()
+	await _test_roll_over_curb()
+	await _test_roll_late_without_window()
+	await _test_no_jump_out_of_hard_landing()
+	await _test_hard_landing_ends_in_air()
 	await _test_wall_climb()
 	await _test_climb_and_grab()
 	await _test_climb_grab_keeps_speed()
+	await _test_grab_at_climb_apex_keeps_speed()
 	await _test_ledge_from_jump()
 	await _test_mantle_jump()
 	await _test_early_jump_in_mantle()
+	await _test_jump_before_grab()
 	await _test_vault()
 	await _test_vault_jump()
 	await _test_left_hold_after_vault()
@@ -82,6 +89,7 @@ func _stand(pos: Vector3, yaw := 0.0) -> void:
 	_player.velocity = Vector3.ZERO
 	_actions.last_left = ""
 	_actions.last_right = ""
+	ParkourFeel.last_event = ""
 	await _frames(40)
 
 
@@ -317,6 +325,71 @@ func _test_roll_into_slide() -> void:
 	_release_all()
 
 
+func _test_roll_held() -> void:
+	print("落ちる間ずっとBを押していても受け身を取る（スライドホップと同じ押し方）")
+	await _drop(4.5)
+	Input.action_press("crouch") # 着地の0.5秒以上前から押しっぱなし
+	await _until_landed()
+	await _frames(2)
+	_check(_player.is_rolling() and not _player.is_hard_landing(), "受け身を取る")
+	_check(_player.horizontal_speed() > 7.8, "速さを保つ (%.2f)" % _player.horizontal_speed())
+	_release_all()
+
+
+func _test_roll_over_curb() -> void:
+	print("受け身の途中で低い段差を落ちても、転がり続ける")
+	await _drop(4.5)
+	await _until_feet_below(1.0)
+	await _tap("crouch")
+	await _until_landed()
+	await _frames(2)
+	_player.global_position.y += 0.3 # 0.3mの段差を下りたのと同じ
+	var rolled_in_air := true
+	for i in int(0.15 / DT):
+		await get_tree().physics_frame
+		rolled_in_air = rolled_in_air and _player.is_rolling()
+	_check(rolled_in_air, "宙に浮いている間も受け身のまま")
+	await _until_landed()
+	await _frames(2)
+	_check(_player.is_rolling(), "下りた先でも転がる")
+	_check(_player.horizontal_speed() > 7.8, "速さを保つ (%.2f)" % _player.horizontal_speed())
+	_release_all()
+
+
+func _test_roll_late_without_window() -> void:
+	print("着地の前の受付を0にしても、着地の直後のBは受け身になる")
+	var window := Tuning.roll_window
+	Tuning.roll_window = 0.0
+	await _drop(4.5)
+	await _until_landed()
+	await _tap("crouch")
+	_check(_player.is_rolling(), "受け身に切り替える")
+	Tuning.roll_window = window
+	_release_all()
+
+
+func _test_no_jump_out_of_hard_landing() -> void:
+	print("着地の直前に押したジャンプで、強い着地を飛ばせない")
+	await _drop(4.5)
+	await _until_feet_below(1.0)
+	await _tap("jump")
+	await _until_landed()
+	await _frames(3)
+	_check(_player.is_hard_landing() and _player.is_on_floor(), "強い着地のまま (vy %.2f)" % _player.velocity.y)
+	_release_all()
+
+
+func _test_hard_landing_ends_in_air() -> void:
+	print("強い着地のまま宙に出たら、体勢を崩した状態は終わる")
+	await _drop(4.5)
+	await _until_landed()
+	_check(_player.is_hard_landing(), "強い着地になる")
+	_player.global_position.y += 1.0 # 段差から落ちたのと同じ
+	await _frames(int((Tuning.coyote_time + 0.05) / DT))
+	_check(not _player.is_on_floor() and not _player.is_hard_landing(), "宙では強い着地ではない")
+	_release_all()
+
+
 ## ClimbWall の手前から走って跳び、壁を登る。hand があれば左手を押しっぱなしにする。最高の足の高さを返す。
 func _climb(hand: bool) -> float:
 	await _stand(Vector3(22, 0.9, -8.5))
@@ -372,6 +445,58 @@ func _test_climb_grab_keeps_speed() -> void:
 	_release_all()
 
 
+func _test_grab_at_climb_apex_keeps_speed() -> void:
+	print("壁登りが止まった（頂点）直後に縁を掴んでも、登る前の速さを持ち出す")
+	await _stand(Vector3(22, 0.9, -8.5))
+	await _run_until_z(-11.0)
+	var speed := _player.horizontal_speed()
+	Input.action_press("jump")
+	var was_climbing := false
+	for i in int(2.0 / DT):
+		await get_tree().physics_frame
+		if _player.is_climbing():
+			was_climbing = true
+		elif was_climbing:
+			break
+	_check(was_climbing, "壁を登る")
+	Input.action_press("hand_left")
+	var exit := -1.0
+	var was_busy := false
+	for i in int(1.0 / DT):
+		await get_tree().physics_frame
+		if _actions.is_busy():
+			was_busy = true
+		elif was_busy:
+			exit = _player.horizontal_speed()
+			break
+	_check(was_busy, "縁を掴む")
+	_check(exit >= speed * Tuning.mantle_keep - 0.3, "出口の速さ (%.2f → %.2f)" % [speed, exit])
+	_release_all()
+
+
+func _test_jump_before_grab() -> void:
+	print("掴む前に押したジャンプは、登り切ったときに出ない（先行入力を長くしても）")
+	var buffer := Tuning.jump_buffer
+	Tuning.jump_buffer = 0.5
+	await _stand(Vector3(22, 0.9, -1.5))
+	await _run_until_z(-3.0)
+	await _tap("jump")
+	await _tap("jump") # もう空中なので先行入力として残る
+	Input.action_press("hand_left")
+	var grabbed := false
+	for i in int(1.0 / DT):
+		await get_tree().physics_frame
+		if _actions.is_busy():
+			grabbed = true
+		elif grabbed:
+			break
+	_check(grabbed, "縁を掴む")
+	await _frames(int(0.1 / DT))
+	_check(_player.velocity.y < 1.0, "跳ばない (vy %.2f)" % _player.velocity.y)
+	Tuning.jump_buffer = buffer
+	_release_all()
+
+
 ## ParkourLab の縁（MantleBlock）へ跳んで掴み、登り切る press_before_end 秒前にジャンプを押す。
 ## 体を返した瞬間の速さ exit と、その0.1秒後の {vy, feet, speed} を返す。
 func _mantle_then_jump(press_before_end: float) -> Dictionary:
@@ -381,8 +506,14 @@ func _mantle_then_jump(press_before_end: float) -> Dictionary:
 	Input.action_press("jump")
 	await _frames(2)
 	Input.action_release("jump")
-	while _actions.move != HandActions.Move.MANTLE:
+	for i in int(1.0 / DT):
+		if _actions.move == HandActions.Move.MANTLE:
+			break
 		await get_tree().physics_frame
+	if _actions.move != HandActions.Move.MANTLE:
+		_check(false, "縁を掴む")
+		_release_all()
+		return {"exit": 0.0, "vy": 0.0, "feet": 0.0, "speed": 0.0}
 	var wait := maxi(0, int((_actions._duration - press_before_end) / DT))
 	await _frames(wait)
 	Input.action_press("jump")

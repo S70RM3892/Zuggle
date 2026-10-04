@@ -84,7 +84,7 @@ func _target(side: int) -> Dictionary:
 	var plant := _actions.plant(side) if _actions else {}
 	if not plant.is_empty():
 		return {"transform": _to_camera(side, plant.point, plant.palm, plant.fingers), "planted": true, "pose": plant.pose}
-	if _player.is_rolling() or _player.is_hard_landing():
+	if (_player.is_rolling() or _player.is_hard_landing()) and _player.is_on_floor():
 		return _floor_touch(side)
 	var wall := _player.wall_normal()
 	if wall != Vector3.ZERO:

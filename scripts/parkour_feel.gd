@@ -3,9 +3,8 @@ extends Node
 ## 何をしたかを手の見た目に加えて音と振動でも返す（仕様の柱2「手は意思」）。
 ## 音は起動時にその場で作る。音量（sfx_volume）と振動（rumble_strength）は調整パネルで0にできる。
 
-## テスト用。最後に出した手応えの名前と、出した回数
+## テスト用。最後に出した手応えの名前
 var last_event := ""
-var count := 0
 
 # 名前 → {player, db, pitch, weak, strong, time}
 var _events := {}
@@ -18,8 +17,9 @@ func _ready() -> void:
 	# 名前, 音, 音量(dB), ピッチ, 弱モーター, 強モーター, 振動の長さ(秒)
 	_add("grab", _synth_grab(), -3.0, 1.0, 0.25, 0.35, 0.08) # 縁・ポールを掴む
 	_add("plant", _synth_plant(), -5.0, 1.0, 0.3, 0.1, 0.06) # ボールト・壁押しで手をつく
-	_add("land", _synth_land(), -6.0, 1.0, 0.25, 0.0, 0.05) # ふつうの着地
-	_add("hard_land", _synth_land(), 0.0, 0.75, 0.7, 1.0, 0.2) # 強い着地：同じ音を低く大きく
+	var land := _synth_land()
+	_add("land", land, -6.0, 1.0, 0.25, 0.0, 0.05) # ふつうの着地
+	_add("hard_land", land, 0.0, 0.75, 0.7, 1.0, 0.2) # 強い着地：同じ音を低く大きく
 	_add("roll", _synth_roll(), -3.0, 1.0, 0.35, 0.15, 0.25) # 受け身
 	_add("slide", _synth_slide(), -7.0, 1.0, 0.15, 0.0, 0.12) # スライディング
 	_add("whiff", _synth_whiff(), -14.0, 1.0, 0.0, 0.0, 0.0) # 空振り
@@ -33,7 +33,6 @@ func play(event: String, strength := 1.0) -> void:
 	var e: Dictionary = _events[event]
 	strength = clampf(strength, 0.0, 1.0)
 	last_event = event
-	count += 1
 	var volume := Tuning.sfx_volume * strength
 	if volume > 0.001:
 		var p: AudioStreamPlayer = e.player
