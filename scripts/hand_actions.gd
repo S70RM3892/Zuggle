@@ -45,6 +45,8 @@ var _pole_dir := 1.0
 var _pole_speed := 0.0
 var _pole_r := 0.0
 var _pole_vy := 0.0
+var _side := Side.LEFT # 動作中の手
+var _grounded_exit := false # 出口で足場を蹴って跳べるか（縁の上・障害物の上）
 
 # 手の見た目用。side → {point, palm, fingers, pose, time}
 var _plants := {}
@@ -176,7 +178,7 @@ func find_ledge(dir: Vector3) -> Dictionary:
 
 func _start_mantle(ledge: Dictionary) -> void:
 	var n: Vector3 = ledge.normal
-	var entry := _hvel().length()
+	var entry := _player.carry_speed()
 	var out := _player.facing()
 	if out.dot(-n) < 0.3:
 		out = -n
@@ -185,8 +187,9 @@ func _start_mantle(ledge: Dictionary) -> void:
 	_to = ledge.stand
 	var rise := _to.y - _from.y
 	_duration = Tuning.mantle_time * clampf(rise / 1.2, 0.6, 1.3)
-	_begin(Move.MANTLE)
+	_begin(Move.MANTLE, Side.LEFT, true)
 	last_left = "ledge"
+	ParkourFeel.play("grab")
 	var edge: Vector3 = ledge.edge
 	_set_plant(Side.LEFT, edge - n * 0.06 + Vector3.UP * 0.03, Vector3.DOWN, -n, "grip", _duration + 0.05)
 
@@ -246,11 +249,12 @@ func _start_pole(pole: Node3D) -> void:
 		v = Vector2(_player.facing().x, _player.facing().z)
 	# 今の動きに沿う向きへ回る。r × v の符号で決める
 	_pole_dir = 1.0 if r.cross(v) >= 0.0 else -1.0
-	_pole_speed = maxf(h.length(), Tuning.pole_min_speed)
+	_pole_speed = maxf(_player.carry_speed(), Tuning.pole_min_speed)
 	_pole_vy = minf(_player.velocity.y, 1.0)
 	_duration = Tuning.pole_max_time
-	_begin(Move.POLE)
+	_begin(Move.POLE, Side.LEFT, false) # ポールは離すときに自分でジャンプを見る
 	last_left = "pole"
+	ParkourFeel.play("grab")
 	_update_pole_plant()
 
 
@@ -280,7 +284,6 @@ func _drive_pole(delta: float) -> void:
 func _release_pole(tangent: Vector3, jumped: bool) -> void:
 	var out := tangent * (_pole_speed + Tuning.pole_release_boost)
 	out.y = maxf(Tuning.pole_release_up, Tuning.jump_velocity if jumped else 0.0)
-	_left_needs_release = true
 	_finish(out)
 
 
@@ -353,7 +356,7 @@ func find_vault(dir: Vector3) -> Dictionary:
 
 func _start_vault(v: Dictionary) -> void:
 	var n: Vector3 = v.normal
-	var entry := _hvel().length()
+	var entry := _player.carry_speed()
 	_exit = -n * maxf(entry + Tuning.vault_boost, Tuning.vault_min_exit)
 	_from = _player.global_position
 	_to = v.end
@@ -362,8 +365,9 @@ func _start_vault(v: Dictionary) -> void:
 	_peak = maxf(0.0, top + STAND_CLEAR - lerpf(_from.y, _to.y, 0.5)) + 0.05
 	var dist := Vector2(_to.x - _from.x, _to.z - _from.z).length()
 	_duration = clampf(dist / maxf(entry, 1.0), 0.15, Tuning.vault_time)
-	_begin(Move.VAULT)
+	_begin(Move.VAULT, Side.RIGHT, true)
 	last_right = "vault"
+	ParkourFeel.play("plant")
 	var face: Vector3 = v.face
 	var hand := Vector3(face.x, top + 0.03, face.z) - n * 0.2
 	_set_plant(Side.RIGHT, hand, Vector3.DOWN, -n, "flat", _duration * 0.7)
@@ -400,6 +404,7 @@ func _try_wall_push() -> bool:
 	_player.velocity = v
 	_pushed_normal = n
 	last_right = "push"
+	ParkourFeel.play("plant")
 	var p: Vector3 = hit.position
 	_set_plant(Side.RIGHT, p + n * 0.04, -n, Vector3.UP, "flat", PUSH_HOLD)
 	return true
@@ -434,6 +439,7 @@ func _find_push_wall() -> Dictionary:
 # ---------- 共通 ----------
 
 func _whiff(side: int) -> void:
+	ParkourFeel.play("whiff")
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
 		return
@@ -443,17 +449,21 @@ func _whiff(side: int) -> void:
 	_set_plant(side, p, -b.z, (-b.z + b.y * 0.4).normalized(), "open", WHIFF_HOLD)
 
 
-func _begin(m: int) -> void:
+func _begin(m: int, side: int, grounded_exit: bool) -> void:
 	move = m
+	_side = side
+	_grounded_exit = grounded_exit
 	_t = 0.0
 	_prev_pos = _player.global_position
 	_player.take_control(self)
 
 
 func _finish(exit_velocity: Vector3) -> void:
+	# 左手で掴み終えたら、一度離すまで押しっぱなしでは掴まない。右手の動作なら左手はそのまま
+	if _side == Side.LEFT:
+		_left_needs_release = true
 	move = Move.NONE
-	_left_needs_release = true
-	_player.release_control(exit_velocity)
+	_player.release_control(exit_velocity, _grounded_exit)
 
 
 func _set_plant(side: int, point: Vector3, palm: Vector3, fingers: Vector3, pose: String, hold: float) -> void:

@@ -36,6 +36,10 @@ func _process(_delta: float) -> void:
 			_speed_label.text += "　壁登り中"
 		elif _player.is_sliding():
 			_speed_label.text += "　スライディング中"
+		elif _player.is_rolling():
+			_speed_label.text += "　受け身"
+		elif _player.is_hard_landing():
+			_speed_label.text += "　強い着地"
 		if HitFeel.last_power > 0.0:
 			_speed_label.text += "　直前のヒットの威力 %.2f" % HitFeel.last_power
 

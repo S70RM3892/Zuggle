@@ -1,7 +1,7 @@
 class_name Player
 extends CharacterBody3D
 ## 一人称プレイヤー。走り・ジャンプ・コヨーテタイム・先行入力・壁走り（方向転換・壁ジャンプ）・
-## スライディング・しゃがみ・壁登り・画面揺れ。
+## スライディング・しゃがみ・壁登り・着地（受け身・強い着地）・画面揺れ。
 ## 左手・右手のアクション（縁掴み・ポール回り・ボールト・壁押し）は子の HandActions が持ち、
 ## 動いている間だけ take_control() で体の動きを預かる。
 ## 大原則：動作を切り替えても水平方向の速度を落とさない。
@@ -20,6 +20,7 @@ const CROUCH_HEIGHT := 1.0
 const HEAD_HEIGHT := 0.75 # 立っているときの頭の高さ（体の中心から）
 const CROUCH_HEAD_DROP := 0.8 # しゃがむと目線がどれだけ下がるか
 const WALL_CLIMB_MIN_INPUT := 0.5 # 壁登り：壁へ向けてスティックをどれだけ倒していれば登るか
+const LAND_SOUND_MIN := 3.0 # これより遅い着地（小さな段差）では着地の音を出さない (m/s)
 
 ## falseの間は入力を読まない（デバッグUIを開いているときなど）
 var input_enabled := true
@@ -52,9 +53,15 @@ var _slide_cooldown := 0.0 # スライディングの加速を連打で重ねな
 var _slide_time := 0.0
 var _crouch_amount := 0.0 # 目線の下がり具合（0〜1）。見た目用になめらかに追う
 
+var _crouch_press_age := INF # しゃがみを最後に押してからの時間。受け身の受付に使う
+var _rolling := 0.0 # 受け身の残り時間
+var _stun := 0.0 # 強い着地の残り時間。この間は体が低く、遅く、跳べない
+var _stun_velocity := Vector3.ZERO # 強い着地の直前の水平速度。受け身に切り替えたら戻す
+
 var _climbing := false
 var _climb_time := 0.0
 var _climbed_wall_normal := Vector3.ZERO # 着地するまで同じ壁は登り直さない
+var _climb_carry := 0.0 # 壁登りに入る前の水平の速さ。着地するまでに縁を掴む・上端を越えるなどしたら持ち出す
 
 var _controller: Object = null # 手のアクションが体を動かしている間はここに入る
 var _was_on_floor := true
@@ -106,13 +113,17 @@ func _physics_process(delta: float) -> void:
 		_try_jump()
 		_apply_jump_cut()
 		if _sliding:
-			_apply_slide(delta)
+			_apply_glide(Tuning.slide_friction, delta)
+		elif _rolling > 0.0:
+			_apply_glide(0.0, delta)
 		else:
 			_apply_horizontal(delta)
 	var before := velocity
 	move_and_slide()
 	_landed = is_on_floor() and not _was_on_floor
 	_was_on_floor = is_on_floor()
+	if _landed:
+		_land(-before.y)
 	if _wallrunning:
 		_check_wallrun_end()
 	elif _climbing:
@@ -137,6 +148,9 @@ func respawn() -> void:
 	_sliding = false
 	_crouch_buffer = 0.0
 	_slide_cooldown = 0.0
+	_crouch_press_age = INF
+	_climb_carry = 0.0
+	_end_landing()
 	_set_crouched(false)
 	_crouch_amount = 0.0
 	if _controller != null and _controller.has_method("cancel"):
@@ -175,6 +189,16 @@ func is_crouching() -> bool:
 
 func is_climbing() -> bool:
 	return _climbing
+
+
+## 受け身の最中か。
+func is_rolling() -> bool:
+	return _rolling > 0.0
+
+
+## 強い着地で体勢を崩している最中か。
+func is_hard_landing() -> bool:
+	return _stun > 0.0
 
 
 func is_controlled() -> bool:
@@ -220,17 +244,24 @@ func take_control(controller: Object) -> void:
 	_controller = controller
 	_wallrunning = false
 	_climbing = false
+	_climb_carry = 0.0 # 手のアクションは入る前に carry_speed() で受け取っている
 	_sliding = false
+	_end_landing()
 	_rising_from_jump = false
+	_jump_buffer_timer = 0.0 # 動作の前に押したジャンプは出口へ持ち越さない
 	_set_crouched(false)
 
 
 ## 体を返す。持ち出す速度を渡す。
-func release_control(exit_velocity: Vector3) -> void:
+## grounded（縁の上に乗った・障害物を突いて越えた）なら足場を蹴れるので、動作の終わり際に押したジャンプを出口で出す。
+func release_control(exit_velocity: Vector3, grounded := false) -> void:
 	_controller = null
 	velocity = exit_velocity
-	_jump_buffer_timer = 0.0
 	_was_on_floor = false
+	if grounded:
+		_coyote_timer = Tuning.coyote_time
+	else:
+		_jump_buffer_timer = 0.0
 
 
 ## 壁走り・壁登りを止めて、その壁には着地するまで入り直さない。壁押しで使う。
@@ -239,8 +270,14 @@ func leave_wall(n: Vector3) -> void:
 	_climbing = false
 	_blocked_wall_normal = n
 	_climbed_wall_normal = n
+	_climb_carry = 0.0
 	_wall_coyote_timer = 0.0
 	_rising_from_jump = false
+
+
+## 手のアクションに持ち込める水平の速さ。壁を登ってから着地するまでは、登る前の速さを覚えている。
+func carry_speed() -> float:
+	return maxf(horizontal_speed(), _climb_carry)
 
 
 ## 体の向きを水平に回す（ポール回りでカメラをついて行かせる）。
@@ -281,6 +318,7 @@ func _update_timers(delta: float) -> void:
 		_coyote_timer = Tuning.coyote_time
 		_blocked_wall_normal = Vector3.ZERO
 		_climbed_wall_normal = Vector3.ZERO
+		_climb_carry = 0.0
 	else:
 		_coyote_timer -= delta
 	_wall_coyote_timer -= delta
@@ -291,8 +329,10 @@ func _update_timers(delta: float) -> void:
 		_jump_buffer_timer -= delta
 	if input_enabled and Input.is_action_just_pressed("crouch"):
 		_crouch_buffer = Tuning.slide_buffer
+		_crouch_press_age = 0.0
 	else:
 		_crouch_buffer -= delta
+		_crouch_press_age += delta
 
 
 func _apply_gravity(delta: float) -> void:
@@ -305,6 +345,8 @@ func _apply_gravity(delta: float) -> void:
 
 
 func _try_jump() -> void:
+	if _stun > 0.0:
+		return # 強い着地で体勢を崩している間は跳べない
 	# 先行入力（ボタンが少し早い）とコヨーテタイム（崖から少し遅い）の両方を許す
 	if _jump_buffer_timer > 0.0 and _coyote_timer > 0.0:
 		if _crouching and not can_stand_at(_stand_center()):
@@ -313,8 +355,9 @@ func _try_jump() -> void:
 		_jump_buffer_timer = 0.0
 		_coyote_timer = 0.0
 		_rising_from_jump = true
-		# スライディングから跳んでも速さはそのまま持ち出す（スライドジャンプ）
+		# スライディング・受け身から跳んでも速さはそのまま持ち出す（スライドジャンプ）
 		_sliding = false
+		_end_landing()
 		_set_crouched(false)
 	elif _jump_buffer_timer > 0.0 and _wall_coyote_timer > 0.0:
 		_wall_jump(_last_wall_normal)
@@ -372,7 +415,7 @@ func _try_start_wallrun(before: Vector3) -> void:
 	# 0なら壁と平行、1なら正面衝突。負なら壁から離れている
 	var into := -dir.dot(n)
 	if into > sin(deg_to_rad(Tuning.wallrun_max_angle)):
-		_try_start_climb(n)
+		_try_start_climb(n, speed)
 		return
 	if into < -0.1:
 		return
@@ -383,6 +426,7 @@ func _try_start_wallrun(before: Vector3) -> void:
 	_wall_normal = n
 	_wall_dir = _along_wall(n, dir)
 	_rising_from_jump = false
+	_climb_carry = 0.0
 	# 壁に入る前に押したジャンプで、入った瞬間に壁ジャンプしないようにする
 	_jump_buffer_timer = 0.0
 	_sliding = false
@@ -443,14 +487,15 @@ func _end_wallrun() -> void:
 
 
 ## 壁登り：壁へ正面から当たり、壁へ向けてスティックを倒していたら、壁を蹴って真上へ駆け上がる。
-## 速さは上向きへ変わる。登った先の縁は左手で掴む。
-func _try_start_climb(n: Vector3) -> void:
+## 速さは上向きへ変わる。登った先の縁は左手で掴む。登る前の水平の速さは覚えておき、登り切ったら前へ持ち出す。
+func _try_start_climb(n: Vector3, speed: float) -> void:
 	if n.dot(_climbed_wall_normal) > 0.9 or velocity.y < Tuning.wallclimb_min_vy:
 		return
 	if _input_direction().dot(-n) < WALL_CLIMB_MIN_INPUT:
 		return
 	_climbing = true
 	_climb_time = 0.0
+	_climb_carry = speed
 	_wall_normal = n
 	_climbed_wall_normal = n
 	_rising_from_jump = false
@@ -478,9 +523,10 @@ func _check_climb_end() -> void:
 	elif _input_direction().dot(_wall_normal) > 0.5:
 		_climbing = false
 	elif _cast_wall(-_wall_normal) == Vector3.ZERO:
-		# 壁の上端を越えた：前へ少し押し出して上に乗せる
+		# 壁の上端を越えた：前へ押し出して上に乗せる。登る前の速さも持ち出す
 		_climbing = false
-		velocity += -_wall_normal * Tuning.wallclimb_top_push
+		velocity += -_wall_normal * maxf(Tuning.wallclimb_top_push, _climb_carry * Tuning.mantle_keep)
+		_climb_carry = 0.0
 
 
 ## 壁ジャンプ：壁から離れる向きと上へ跳ぶ。スティックを倒していればその向きへ跳び、速さは落とさない。
@@ -497,6 +543,7 @@ func _wall_jump(n: Vector3) -> void:
 	velocity = Vector3(out.x, Tuning.wall_jump_up, out.z)
 	_wallrunning = false
 	_climbing = false
+	_climb_carry = 0.0
 	_blocked_wall_normal = n
 	_wall_coyote_timer = 0.0
 	_coyote_timer = 0.0
@@ -554,6 +601,9 @@ func _input_direction() -> Vector3:
 ## 遅いときはしゃがみ歩き。低い天井の下では立ち上がらない。
 func _update_crouch(delta: float) -> void:
 	var held := input_enabled and Input.is_action_pressed("crouch")
+	if _rolling > 0.0 or _stun > 0.0:
+		_update_landing(delta, held)
+		return
 	if is_on_floor():
 		# 押した直後か、押しっぱなしで着地した瞬間（スライドホップ）ならスライディング
 		var wants := _crouch_buffer > 0.0 or (held and _landed)
@@ -577,6 +627,7 @@ func _start_slide() -> void:
 	_slide_time = 0.0
 	_crouch_buffer = 0.0
 	_set_crouched(true)
+	ParkourFeel.play("slide")
 	# 加速は待ち時間が明けているときだけ。連打では重ならない
 	if _slide_cooldown <= 0.0:
 		var h := Vector3(velocity.x, 0.0, velocity.z)
@@ -587,10 +638,10 @@ func _start_slide() -> void:
 		_slide_cooldown = Tuning.slide_boost_cooldown
 
 
-## スライディング中：向きはほぼ保ったまま、少しずつ減速する。スティックで少しだけ曲がれる。
-func _apply_slide(delta: float) -> void:
+## スライディング・受け身の間：向きはほぼ保ったまま、friction で減速する。スティックで少しだけ曲がれる。
+func _apply_glide(friction: float, delta: float) -> void:
 	var h := Vector2(velocity.x, velocity.z)
-	var speed := maxf(0.0, h.length() - Tuning.slide_friction * delta)
+	var speed := maxf(0.0, h.length() - friction * delta)
 	var dir := h.normalized() if h.length() > 0.01 else Vector2.ZERO
 	var wish := _input_direction()
 	var w := Vector2(wish.x, wish.z)
@@ -601,6 +652,72 @@ func _apply_slide(delta: float) -> void:
 	h = dir * speed
 	velocity.x = h.x
 	velocity.z = h.y
+
+
+## 着地。高いところから落ちたとき（落下の速さが hard_landing_speed 以上）、
+## 着地の直前にしゃがみを押した・押し続けていれば受け身で速さを保ち、そうでなければ強い着地で大きく減速する。
+## 押し続けでよいのは、空中でしゃがみを押しておくスライドホップと同じ押し方で受け身も取れるようにするため。
+func _land(fall_speed: float) -> void:
+	if fall_speed < Tuning.hard_landing_speed:
+		if fall_speed >= LAND_SOUND_MIN:
+			ParkourFeel.play("land", fall_speed / Tuning.hard_landing_speed)
+		return
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	var held := input_enabled and Input.is_action_pressed("crouch")
+	if held or _crouch_press_age <= Tuning.roll_window:
+		_start_roll(h)
+		return
+	ParkourFeel.play("hard_land")
+	_stun = Tuning.hard_landing_time
+	_rolling = 0.0
+	_stun_velocity = h
+	velocity.x = h.x * Tuning.hard_landing_keep
+	velocity.z = h.z * Tuning.hard_landing_keep
+	_sliding = false
+	_set_crouched(true)
+	add_trauma(Tuning.land_shake)
+
+
+## 受け身：体を低くして転がり、着地の前の水平の速さをそのまま前へ持ち出す。真下に落ちても前へ出る。
+func _start_roll(h: Vector3) -> void:
+	var speed := h.length()
+	var dir := h / speed if speed > 0.5 else facing()
+	speed = maxf(speed, Tuning.roll_min_speed)
+	velocity.x = dir.x * speed
+	velocity.z = dir.z * speed
+	_rolling = Tuning.roll_time
+	_stun = 0.0
+	_crouch_buffer = 0.0 # 着地でスライディングには入らない（受け身が終わってから）
+	_sliding = false
+	_set_crouched(true)
+	ParkourFeel.play("roll")
+
+
+## 受け身・強い着地の間は体を低くしたまま。強い着地の直後なら、まだ受け身に切り替えられる。
+## 受け身は低い段差を下りて宙に出ても最後まで転がる。強い着地は宙に出たら終わる。
+## 受け身が終わったときにしゃがみを押し続けていれば、そのままスライディングへつなぐ。
+func _update_landing(delta: float, held: bool) -> void:
+	if _stun > 0.0:
+		if not is_on_floor() and _coyote_timer <= 0.0:
+			_stun = 0.0
+			return
+		var since_land := Tuning.hard_landing_time - _stun
+		if _crouch_press_age <= since_land and since_land <= Tuning.roll_late:
+			_start_roll(_stun_velocity) # 着地の後に押した
+			return
+		_stun -= delta
+		return
+	_rolling -= delta
+	if _rolling > 0.0:
+		return
+	_rolling = 0.0
+	if held and is_on_floor() and horizontal_speed() >= Tuning.slide_min_speed:
+		_start_slide()
+
+
+func _end_landing() -> void:
+	_rolling = 0.0
+	_stun = 0.0
 
 
 func _set_crouched(on: bool) -> void:
@@ -635,11 +752,18 @@ func _update_camera(delta: float) -> void:
 	elif _sliding:
 		roll = deg_to_rad(Tuning.slide_tilt)
 	_roll = lerpf(_roll, roll, minf(1.0, 10.0 * delta))
+	# 着地：受け身・強い着地の間、視点を前へ倒して戻す
+	var dip := 0.0
+	if _rolling > 0.0:
+		dip = sin(PI * (1.0 - _rolling / maxf(Tuning.roll_time, 0.01)))
+	elif _stun > 0.0:
+		dip = 0.6 * sin(PI * (1.0 - _stun / maxf(Tuning.hard_landing_time, 0.01)))
+	var land_dip := dip * deg_to_rad(Tuning.land_dip)
 	# 画面揺れ（トラウマ値の減衰方式）：揺れ = トラウマ²、向きはノイズで滑らかに
 	_trauma = maxf(0.0, _trauma - Tuning.shake_decay * delta)
 	_shake_time += delta * Tuning.shake_freq
 	var shake := _trauma * _trauma * deg_to_rad(Tuning.shake_max_angle)
 	camera.rotation = Vector3(
-		shake * _noise.get_noise_2d(_shake_time, 0.0),
+		-land_dip + shake * _noise.get_noise_2d(_shake_time, 0.0),
 		shake * _noise.get_noise_2d(_shake_time, 100.0),
 		_roll + shake * 0.5 * _noise.get_noise_2d(_shake_time, 200.0))

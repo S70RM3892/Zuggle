@@ -69,6 +69,8 @@ func _process(delta: float) -> void:
 		roll = 35.0 # 脚を横へ流して越える
 	elif move == HandActions.Move.POLE:
 		pose = [40.0, 50.0, 15.0, 30.0]
+	elif _player.is_rolling():
+		pose = [105.0, 135.0, 95.0, 125.0] # 膝を抱えて転がる
 	elif _player.is_sliding():
 		# 前の脚を伸ばし、後ろの脚を畳む
 		pose = [70.0, 110.0, 85.0, 5.0]
@@ -87,7 +89,7 @@ func _process(delta: float) -> void:
 		pose = [a, 10.0 + maxf(0.0, -cos(_phase)) * 70.0 * run, -a, 10.0 + maxf(0.0, cos(_phase)) * 70.0 * run]
 	else:
 		pose = [0.0, 5.0, 0.0, 5.0]
-	if _player.is_crouching() and not _player.is_sliding() and _player.is_on_floor():
+	if _player.is_crouching() and not _player.is_sliding() and not _player.is_rolling() and _player.is_on_floor():
 		for i in [0, 2]:
 			pose[i] = pose[i] + 70.0
 			pose[i + 1] = pose[i + 1] + 80.0
