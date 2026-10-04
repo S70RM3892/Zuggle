@@ -20,6 +20,7 @@ const CROUCH_HEIGHT := 1.0
 const HEAD_HEIGHT := 0.75 # 立っているときの頭の高さ（体の中心から）
 const CROUCH_HEAD_DROP := 0.8 # しゃがむと目線がどれだけ下がるか
 const WALL_CLIMB_MIN_INPUT := 0.5 # 壁登り：壁へ向けてスティックをどれだけ倒していれば登るか
+const LAND_SOUND_MIN := 3.0 # これより遅い着地（小さな段差）では着地の音を出さない (m/s)
 
 ## falseの間は入力を読まない（デバッグUIを開いているときなど）
 var input_enabled := true
@@ -618,6 +619,7 @@ func _start_slide() -> void:
 	_slide_time = 0.0
 	_crouch_buffer = 0.0
 	_set_crouched(true)
+	ParkourFeel.play("slide")
 	# 加速は待ち時間が明けているときだけ。連打では重ならない
 	if _slide_cooldown <= 0.0:
 		var h := Vector3(velocity.x, 0.0, velocity.z)
@@ -648,11 +650,14 @@ func _apply_glide(friction: float, delta: float) -> void:
 ## 着地の直前にしゃがみを押していれば受け身で速さを保ち、押していなければ強い着地で大きく減速する。
 func _land(fall_speed: float) -> void:
 	if fall_speed < Tuning.hard_landing_speed:
+		if fall_speed >= LAND_SOUND_MIN:
+			ParkourFeel.play("land", fall_speed / Tuning.hard_landing_speed)
 		return
 	var h := Vector3(velocity.x, 0.0, velocity.z)
 	if _roll_buffer > 0.0:
 		_start_roll(h)
 		return
+	ParkourFeel.play("hard_land")
 	_stun = Tuning.hard_landing_time
 	_stun_age = 0.0
 	_stun_velocity = h
@@ -676,6 +681,7 @@ func _start_roll(h: Vector3) -> void:
 	_crouch_buffer = 0.0 # 着地でスライディングには入らない（受け身が終わってから）
 	_sliding = false
 	_set_crouched(true)
+	ParkourFeel.play("roll")
 
 
 ## 受け身・強い着地の間は体を低くしたまま。強い着地の直後なら、まだ受け身に切り替えられる。

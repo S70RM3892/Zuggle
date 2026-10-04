@@ -103,6 +103,7 @@ const SPECS := [
 	["dummy_damping", "ダミーの戻りの減衰", 0.0, 40.0, 0.5],
 	["dummy_squash", "ダミーの伸び縮み", 0.0, 1.0, 0.01],
 	["weapon_squash", "手・武器の伸び縮み", 0.0, 0.5, 0.01],
+	["sfx_volume", "パルクールの効果音の音量 (0でオフ)", 0.0, 1.0, 0.05],
 	["sfx_pitch_spread", "効果音のピッチのずれ (±)", 0.0, 0.3, 0.01],
 ]
 
@@ -205,6 +206,7 @@ var dummy_stiffness := 80.0
 var dummy_damping := 9.0 # 減衰比0.5前後。少し行き過ぎてから戻る
 var dummy_squash := 0.25
 var weapon_squash := 0.15
+var sfx_volume := 0.8
 var sfx_pitch_spread := 0.08
 
 var _defaults := {}

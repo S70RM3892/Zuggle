@@ -187,6 +187,7 @@ func _start_mantle(ledge: Dictionary) -> void:
 	_duration = Tuning.mantle_time * clampf(rise / 1.2, 0.6, 1.3)
 	_begin(Move.MANTLE)
 	last_left = "ledge"
+	ParkourFeel.play("grab")
 	var edge: Vector3 = ledge.edge
 	_set_plant(Side.LEFT, edge - n * 0.06 + Vector3.UP * 0.03, Vector3.DOWN, -n, "grip", _duration + 0.05)
 
@@ -251,6 +252,7 @@ func _start_pole(pole: Node3D) -> void:
 	_duration = Tuning.pole_max_time
 	_begin(Move.POLE)
 	last_left = "pole"
+	ParkourFeel.play("grab")
 	_update_pole_plant()
 
 
@@ -363,6 +365,7 @@ func _start_vault(v: Dictionary) -> void:
 	_duration = clampf(dist / maxf(entry, 1.0), 0.15, Tuning.vault_time)
 	_begin(Move.VAULT)
 	last_right = "vault"
+	ParkourFeel.play("plant")
 	var face: Vector3 = v.face
 	var hand := Vector3(face.x, top + 0.03, face.z) - n * 0.2
 	_set_plant(Side.RIGHT, hand, Vector3.DOWN, -n, "flat", _duration * 0.7)
@@ -399,6 +402,7 @@ func _try_wall_push() -> bool:
 	_player.velocity = v
 	_pushed_normal = n
 	last_right = "push"
+	ParkourFeel.play("plant")
 	var p: Vector3 = hit.position
 	_set_plant(Side.RIGHT, p + n * 0.04, -n, Vector3.UP, "flat", PUSH_HOLD)
 	return true
@@ -433,6 +437,7 @@ func _find_push_wall() -> Dictionary:
 # ---------- 共通 ----------
 
 func _whiff(side: int) -> void:
+	ParkourFeel.play("whiff")
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
 		return

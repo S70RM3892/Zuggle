@@ -109,6 +109,7 @@ func _test_slide() -> void:
 	Input.action_press("crouch")
 	await _frames(3)
 	_check(_player.is_sliding(), "走ってしゃがむとスライディングに入る")
+	_check(ParkourFeel.last_event == "slide", "床を擦る音")
 	_check(_player.horizontal_speed() > before + Tuning.slide_boost * 0.8, "加速する (%.2f → %.2f)" % [before, _player.horizontal_speed()])
 	await _frames(int(0.2 / DT))
 	_check(_player.get_node("Head").position.y < Player.HEAD_HEIGHT - 0.4, "目線が下がる (%.2f)" % _player.get_node("Head").position.y)
@@ -246,6 +247,7 @@ func _test_low_drop() -> void:
 	await _until_landed()
 	await _frames(2)
 	_check(not _player.is_hard_landing() and not _player.is_rolling(), "強い着地にも受け身にもならない")
+	_check(ParkourFeel.last_event == "land", "ふつうの着地の音")
 	_check(_player.horizontal_speed() > 7.8, "速さはそのまま (%.2f)" % _player.horizontal_speed())
 	_release_all()
 
@@ -255,6 +257,7 @@ func _test_hard_landing() -> void:
 	await _drop(4.5)
 	await _until_landed()
 	_check(_player.is_hard_landing(), "強い着地になる")
+	_check(ParkourFeel.last_event == "hard_land", "重い着地の音")
 	_check(_player.horizontal_speed() < 3.5, "大きく減速する (%.2f)" % _player.horizontal_speed())
 	_check(_player.is_crouching(), "体が低くなる")
 	await _frames(int((Tuning.hard_landing_time + 0.3) / DT))
@@ -271,6 +274,7 @@ func _test_roll() -> void:
 	await _until_landed()
 	await _frames(2)
 	_check(_player.is_rolling() and not _player.is_hard_landing(), "受け身を取る")
+	_check(ParkourFeel.last_event == "roll", "転がる音")
 	_check(_player.horizontal_speed() > 7.8, "速さを保つ (%.2f)" % _player.horizontal_speed())
 	await _frames(int(0.15 / DT))
 	_check(_player.camera.rotation.x < -deg_to_rad(Tuning.land_dip) * 0.5, "視点が前へ倒れる (%.0f 度)" % rad_to_deg(_player.camera.rotation.x))
@@ -418,6 +422,7 @@ func _test_ledge_from_jump() -> void:
 		await get_tree().physics_frame
 		if _actions.move == HandActions.Move.MANTLE:
 			grabbed = true
+			_check(ParkourFeel.last_event == "grab", "掴む音")
 			await _frames(int(0.08 / DT))
 			var plant := _actions.plant(HandActions.Side.LEFT)
 			hand_near = not plant.is_empty() and _hands.hand_position(HandActions.Side.LEFT).distance_to(plant.point) < 0.25
@@ -438,6 +443,7 @@ func _test_vault() -> void:
 	var speed := _player.horizontal_speed()
 	await _tap("hand_right")
 	_check(_actions.last_right == "vault", "低い障害物に手をついて越える")
+	_check(ParkourFeel.last_event == "plant", "手をつく音")
 	while _actions.is_busy():
 		await get_tree().physics_frame
 	_check(_player.global_position.z < 5.4, "向こう側へ出る (z %.2f)" % _player.global_position.z)

@@ -2,8 +2,6 @@ extends Node
 ## 当たった瞬間の誇張をまとめて出す（自動読み込みの `HitFeel`）。
 ## 威力の計算、ヒットストップ、振動、効果音。画面揺れはプレイヤーのカメラが持つ。
 
-const SAMPLE_RATE := 22050
-
 ## 直近のヒットの威力（調整パネルの表示用）
 var last_power := 0.0
 
@@ -90,40 +88,23 @@ func _play(p: AudioStreamPlayer, volume_db: float) -> void:
 
 ## 打撃音：低いドンと、短いノイズのザッを重ねる。音素材を持たずに済むよう、その場で作る。
 func _synth_hit() -> AudioStreamWAV:
-	var n := int(SAMPLE_RATE * 0.18)
-	var samples := PackedFloat32Array()
-	samples.resize(n)
+	var samples := Synth.buffer(0.18)
 	var phase := 0.0
-	for i in n:
-		var t := float(i) / SAMPLE_RATE
-		phase += TAU * lerpf(140.0, 55.0, minf(t / 0.12, 1.0)) / SAMPLE_RATE
+	for i in samples.size():
+		var t := float(i) / Synth.SAMPLE_RATE
+		phase += TAU * lerpf(140.0, 55.0, minf(t / 0.12, 1.0)) / Synth.SAMPLE_RATE
 		var thump := sin(phase) * exp(-t * 22.0)
 		var crack := randf_range(-1.0, 1.0) * exp(-t * 60.0)
 		samples[i] = thump * 0.8 + crack * 0.5
-	return _to_wav(samples)
+	return Synth.to_wav(samples)
 
 
 ## 風切り音：ノイズを山なりの音量でなぞる。
 func _synth_swing() -> AudioStreamWAV:
-	var n := int(SAMPLE_RATE * 0.14)
-	var samples := PackedFloat32Array()
-	samples.resize(n)
+	var samples := Synth.buffer(0.14)
 	var smooth := 0.0
-	for i in n:
-		var x := float(i) / n
+	for i in samples.size():
+		var x := float(i) / samples.size()
 		smooth = lerpf(smooth, randf_range(-1.0, 1.0), 0.25) # ざっくり高域を落とす
 		samples[i] = smooth * sin(PI * x) * 0.6
-	return _to_wav(samples)
-
-
-func _to_wav(samples: PackedFloat32Array) -> AudioStreamWAV:
-	var data := PackedByteArray()
-	data.resize(samples.size() * 2)
-	for i in samples.size():
-		data.encode_s16(i * 2, int(clampf(samples[i], -1.0, 1.0) * 32767.0))
-	var wav := AudioStreamWAV.new()
-	wav.format = AudioStreamWAV.FORMAT_16_BITS
-	wav.mix_rate = SAMPLE_RATE
-	wav.stereo = false
-	wav.data = data
-	return wav
+	return Synth.to_wav(samples)
